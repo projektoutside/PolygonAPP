@@ -374,18 +374,25 @@
             background: rgba(255, 255, 255, 0.2);
             border: none;
             color: white;
-            padding: 8px 12px;
+            padding: 8px;
             border-radius: var(--radius-md);
             cursor: pointer;
             font-weight: 600;
             font-size: 14px;
             transition: all 0.2s ease;
             align-items: center;
-            gap: 6px;
+            justify-content: center;
             min-height: var(--touch-target-min);
             min-width: var(--touch-target-min);
             -webkit-tap-highlight-color: transparent;
             touch-action: manipulation;
+        }
+
+        /* Show back button on mobile/tablet and style it */
+        @media (max-width: 1024px) {
+            .panel-back-btn {
+                display: flex;
+            }
         }
 
         .panel-back-btn:hover {
@@ -403,13 +410,7 @@
             stroke-width: 2.5;
         }
 
-        /* Show back button on mobile and tablets when sidebar is open */
-        @media (max-width: 1024px) {
-            .sidebar.mobile-open .panel-back-btn,
-            .sidebar-right.mobile-open .panel-back-btn {
-                display: flex;
-            }
-        }
+        /* Back button visibility is handled above */
 
         /* Toolbar - Compact Top Bar for All Devices */
         .toolbar {
@@ -1928,9 +1929,15 @@
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M19 12H5M12 19l-7-7 7-7"/>
                             </svg>
-                            <span>Back</span>
                         </button>
-                        <span>📐 Layers</span>
+                        <span>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 6px;">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                <rect x="7" y="7" width="10" height="10" rx="1" ry="1"/>
+                                <rect x="11" y="11" width="6" height="6" rx="0.5" ry="0.5"/>
+                            </svg>
+                            Layers
+                        </span>
                         <span id="layerCount">0</span>
                     </div>
                     <div class="resizable-panel-content">
@@ -2015,7 +2022,6 @@
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M19 12H5M12 19l-7-7 7-7"/>
                             </svg>
-                            <span>Back</span>
                         </button>
                         <span>👁️ Visualizers</span>
                     </div>
@@ -4138,8 +4144,10 @@
                             this.selectedVertex = polygonHit.vertex;
                             // Lock to drag gesture when touching vertex
                             this.touchGestureLocked = true;
-                            // Use world coordinates for polygon dragging
-                            this.dragStart = snappedPos; // World coordinates for polygon drag
+                            // Immediately enable dragging for vertices - no threshold needed
+                            this.isDragging = true;
+                            // Use world coordinates for vertex dragging
+                            this.dragStart = snappedPos; // World coordinates for vertex drag
                             this.potentialDragStart = snappedPos;
                             // panStartPos already set to screen coordinates above
                         } else {
@@ -4331,11 +4339,19 @@
                 }
 
                 // Handle dragging selected polygon or vertex
-                if (this.isDragging) {
+                // For vertices, start dragging immediately when touched (no threshold)
+                if (this.selectedVertex && this.touchGestureLocked) {
+                    // Vertex dragging - update position directly
+                    this.selectedVertex.x = snappedPos.x;
+                    this.selectedVertex.y = snappedPos.y;
+                    this.updateProperties();
+                    this.render(true); // Force render during drag
+                } else if (this.isDragging) {
                     if (this.selectedVertex) {
-                        // Drag vertex
+                        // Drag vertex (fallback - should be handled above)
                         this.selectedVertex.x = snappedPos.x;
                         this.selectedVertex.y = snappedPos.y;
+                        this.updateProperties();
                         this.render(true); // Force render during drag
                     } else if (this.selectedPolygon && this.dragStart) {
                         // Drag polygon
@@ -6135,7 +6151,7 @@
                     leftToggle = document.createElement('button');
                     leftToggle.id = 'mobileMenuLeft';
                     leftToggle.className = 'mobile-menu-toggle';
-                    leftToggle.innerHTML = '📐';
+                    leftToggle.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><rect x="7" y="7" width="10" height="10" rx="1" ry="1"/><rect x="11" y="11" width="6" height="6" rx="0.5" ry="0.5"/></svg>';
                     leftToggle.setAttribute('aria-label', 'Toggle Layers Panel');
                     leftToggle.style.left = '12px';
                     leftToggle.addEventListener('click', (e) => {
