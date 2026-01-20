@@ -1747,13 +1747,25 @@
             height: 40px;
             /* Header height only */
             pointer-events: none;
+            position: relative;
+        }
+
+        .bottom-panel.collapsed * {
+            pointer-events: none;
         }
 
         .bottom-panel.collapsed .bottom-panel-content {
             display: none;
+            pointer-events: none;
         }
 
         .bottom-panel.collapsed .bottom-panel-header {
+            pointer-events: auto !important;
+            position: relative;
+            z-index: 1002;
+        }
+
+        .bottom-panel.collapsed .bottom-panel-header * {
             pointer-events: auto;
         }
 
@@ -3477,14 +3489,14 @@
                     const unionResultVertices = PolygonBoolean.union(polygonsToCombine);
 
                     if (unionResultVertices && unionResultVertices.length >= 3) {
-                        // Success
-
-                        // Remove old polygons
-                        this.polygons = this.polygons.filter(p => !this.combineSelection.has(p));
-
-                        // Add new polygon
+                        // Success - create new polygon first
                         const newPoly = new Polygon(unionResultVertices, this.currentColor);
                         newPoly.name = 'Combined Polygon ' + (this.polygons.length + 1);
+                        
+                        // Remove old polygons only after successful creation
+                        this.polygons = this.polygons.filter(p => !this.combineSelection.has(p));
+                        
+                        // Add new polygon
                         this.polygons.push(newPoly);
 
                         this.selectedPolygon = newPoly;
@@ -3493,14 +3505,21 @@
                         this.updateLayers();
                         this.exitCombineMode();
                         this.setTool('select');
+                        this.render();
 
                         // Show success feedback?
                     } else {
+                        // Don't remove polygons if union failed
                         alert('Could not combine polygons. Ensure they overlap and form a valid shape.');
+                        console.warn('Union failed - polygons preserved', {
+                            polygonsToCombine: polygonsToCombine.length,
+                            result: unionResultVertices
+                        });
                     }
                 } catch (e) {
-                    console.error(e);
+                    console.error('Error combining polygons:', e);
                     alert('Error combining polygons: ' + e.message);
+                    // Don't remove polygons on error
                 }
             }
 
@@ -6425,18 +6444,64 @@
                 if (polygons.length < 2) return null;
 
                 let result = this.cleanPolygon(polygons[0].vertices);
+                if (!result || result.length < 3) return null;
 
                 for (let i = 1; i < polygons.length; i++) {
                     const clip = this.cleanPolygon(polygons[i].vertices);
+                    if (!clip || clip.length < 3) continue;
+
                     const combinedCycles = this.unionTwoPolygons(result, clip);
 
                     if (combinedCycles && combinedCycles.length > 0) {
                         // Get only the outer boundary cycle (largest area, containing all others)
-                        result = this.getOuterBoundary(combinedCycles);
+                        const outerBoundary = this.getOuterBoundary(combinedCycles);
+                        if (outerBoundary && outerBoundary.length >= 3) {
+                            result = outerBoundary;
+                        } else {
+                            // If getOuterBoundary fails, the union operation failed
+                            console.warn('Union failed: could not determine outer boundary', {
+                                cyclesCount: combinedCycles.length
+                            });
+                            return null;
+                        }
+                    } else {
+                        // If no cycles returned, polygons might be completely disjoint
+                        // For union of disjoint polygons, we need to check if they overlap at all
+                        // If they don't overlap, union should return a single polygon containing both
+                        // But since unionTwoPolygons returned nothing, they might be too far apart
+                        // In this case, we'll try to create a bounding polygon
+                        console.warn('Union returned no cycles - polygons may be disjoint');
+                        
+                        // Check if polygons overlap by testing if any vertex of one is inside the other
+                        let hasOverlap = false;
+                        for (let v of clip) {
+                            if (this.pointRelation(v, result) !== 1) {
+                                hasOverlap = true;
+                                break;
+                            }
+                        }
+                        if (!hasOverlap) {
+                            for (let v of result) {
+                                if (this.pointRelation(v, clip) !== 1) {
+                                    hasOverlap = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!hasOverlap) {
+                            // Polygons are disjoint - return null to indicate failure
+                            // User should ensure polygons overlap for union
+                            return null;
+                        } else {
+                            // There should be overlap but unionTwoPolygons failed
+                            // This is an error case
+                            return null;
+                        }
                     }
                 }
 
-                return result;
+                return result && result.length >= 3 ? result : null;
             }
 
             // Get the outer boundary cycle from multiple cycles, discarding internal ones
