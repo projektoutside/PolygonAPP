@@ -3532,27 +3532,13 @@
                 const polygonsToRemove = new Set(this.combineSelection);
 
                 try {
-                    // Log input for debugging
-                    console.log('Combining polygons:', {
-                        count: polygonsToCombine.length,
-                        polygonSizes: polygonsToCombine.map(p => p.vertices.length)
-                    });
-                    
                     const unionResultVertices = PolygonBoolean.union(polygonsToCombine);
-                    
-                    // Log result for debugging
-                    console.log('Union result:', {
-                        result: unionResultVertices,
-                        isArray: Array.isArray(unionResultVertices),
-                        length: unionResultVertices ? unionResultVertices.length : 'null/undefined',
-                        isValid: unionResultVertices && Array.isArray(unionResultVertices) && unionResultVertices.length >= 3
-                    });
 
                     // Validate union result more strictly
                     if (unionResultVertices && 
                         Array.isArray(unionResultVertices) && 
                         unionResultVertices.length >= 3 &&
-                        unionResultVertices.every(v => v && typeof v.x === 'number' && typeof v.y === 'number' && isFinite(v.x) && isFinite(v.y))) {
+                        unionResultVertices.every(v => v && typeof v.x === 'number' && typeof v.y === 'number')) {
                         
                         // Success - create new polygon first BEFORE removing old ones
                         const newPoly = new Polygon(unionResultVertices, this.currentColor);
@@ -6730,12 +6716,22 @@
                             return null;
                         }
                     } else {
-                        // If no cycles returned, polygons might be completely disjoint or just touching
-                        // Check if polygons overlap or are touching
+                        // If no cycles returned, check what happened
+                        // This could mean:
+                        // 1. Polygons are completely disjoint (no overlap)
+                        // 2. One polygon is completely inside the other (should have been handled)
+                        // 3. Union algorithm failed due to edge case
+                        
+                        console.warn('Union returned no cycles', {
+                            resultLength: result.length,
+                            clipLength: clip.length
+                        });
+
+                        // Check if polygons overlap or touch
                         let hasOverlap = false;
                         let areTouching = false;
                         
-                        // Check if any vertex of one polygon is inside or on the boundary of the other
+                        // Check vertex overlap
                         for (let v of clip) {
                             const rel = this.pointRelation(v, result);
                             if (rel !== 1) { // Inside or on boundary
@@ -6775,20 +6771,20 @@
                             }
                         }
 
-                        if (hasOverlap || areTouching) {
-                            // Polygons overlap or touch - try creating a bounding polygon as fallback
+                        if (!hasOverlap && !areTouching) {
+                            // Polygons are completely disjoint - return null
+                            console.warn('Polygons are disjoint - cannot combine');
+                            return null;
+                        } else {
+                            // Polygons overlap or touch but union failed
+                            // Try to create a bounding polygon as fallback
                             const allVertices = [...result, ...clip];
                             const boundingPoly = this.createBoundingPolygon(allVertices);
                             if (boundingPoly && boundingPoly.length >= 3) {
-                                console.warn('Using bounding polygon for union (polygons touch/overlap but union algorithm failed)');
-                                result = boundingPoly;
-                            } else {
-                                console.warn('Union failed: polygons overlap/touch but could not create valid result');
-                                return null;
+                                console.warn('Using bounding polygon fallback for union');
+                                return boundingPoly;
                             }
-                        } else {
-                            // Polygons are completely disjoint - return null
-                            console.warn('Union failed: polygons are completely disjoint');
+                            console.warn('Union failed: polygons overlap but could not create result');
                             return null;
                         }
                     }
@@ -6931,34 +6927,83 @@
                 const EPSILON = 1e-4;
 
                 // Check if one polygon is completely inside the other
-                const aCenter = this.getPolygonCenter(polyA);
-                const bCenter = this.getPolygonCenter(polyB);
-                const aInB = this.pointRelation(aCenter, polyB);
-                const bInA = this.pointRelation(bCenter, polyA);
+                // Test center points and a few vertices
+                const testPointsA = [
+                    this.getPolygonCenter(polyA),
+                    polyA[0],
+                    polyA[Math.floor(polyA.length / 2)]
+                ].filter(p => p);
+                
+                const testPointsB = [
+                    this.getPolygonCenter(polyB),
+                    polyB[0],
+                    polyB[Math.floor(polyB.length / 2)]
+                ].filter(p => p);
 
-                // If one polygon is completely inside the other, return the outer one
-                if (aInB === -1 && bInA === 1) {
-                    // A is completely inside B, return B
+                let aCompletelyInB = true;
+                let bCompletelyInA = true;
+                
+                for (let p of testPointsA) {
+                    if (this.pointRelation(p, polyB) === 1) {
+                        aCompletelyInB = false;
+                        break;
+                    }
+                }
+                
+                for (let p of testPointsB) {
+                    if (this.pointRelation(p, polyA) === 1) {
+                        bCompletelyInA = false;
+                        break;
+                    }
+                }
+
+                // If one is completely inside the other, return the outer one
+                if (aCompletelyInB && !bCompletelyInA) {
                     return [polyB];
-                } else if (bInA === -1 && aInB === 1) {
-                    // B is completely inside A, return A
+                } else if (bCompletelyInA && !aCompletelyInB) {
                     return [polyA];
                 }
 
                 for (let seg of allSegs) {
-                    const mid = this.getMidpoint(seg);
                     const otherPoly = seg.origin === 'A' ? polyB : polyA;
-                    const relation = this.pointRelation(mid, otherPoly);
+                    
+                    // Check multiple points along the segment, not just the midpoint
+                    // This is crucial for overlapping triangles where midpoint might be inside
+                    // but the segment is partially outside
+                    const testPoints = [
+                        seg.p1,
+                        this.getMidpoint(seg),
+                        seg.p2,
+                        { x: seg.p1.x + (seg.p2.x - seg.p1.x) * 0.25, y: seg.p1.y + (seg.p2.y - seg.p1.y) * 0.25 },
+                        { x: seg.p1.x + (seg.p2.x - seg.p1.x) * 0.75, y: seg.p1.y + (seg.p2.y - seg.p1.y) * 0.75 }
+                    ];
+                    
+                    let allInside = true;
+                    let allOutside = true;
+                    let anyOnBoundary = false;
+                    
+                    for (let testPoint of testPoints) {
+                        const relation = this.pointRelation(testPoint, otherPoly);
+                        if (relation === 0) {
+                            anyOnBoundary = true;
+                            allInside = false;
+                            allOutside = false;
+                        } else if (relation === 1) {
+                            allInside = false;
+                        } else if (relation === -1) {
+                            allOutside = false;
+                        }
+                    }
 
-                    if (relation === 1) {
-                        // Strictly outside - always keep
+                    if (allOutside) {
+                        // All points outside - always keep
                         keptSegs.push(seg);
-                    } else if (relation === -1) {
-                        // Strictly inside - always discard
+                    } else if (allInside && !anyOnBoundary) {
+                        // All points strictly inside - discard
                         continue;
                     } else {
-                        // On boundary (relation === 0) - check for shared/overlapping segments
-                        // Find any segment from the OTHER polygon that overlaps this one
+                        // Segment is partially inside/outside or on boundary
+                        // Check for shared/overlapping segments
                         const otherSegs = allSegs.filter(s => s.origin !== seg.origin);
                         const matching = otherSegs.find(s =>
                             (this.distSq(s.p1, seg.p1) < EPSILON && this.distSq(s.p2, seg.p2) < EPSILON) ||
@@ -6966,29 +7011,31 @@
                         );
 
                         if (matching) {
-                            // It's a shared edge.
+                            // It's a shared edge
                             const isSameDirection = this.distSq(seg.p1, matching.p1) < EPSILON;
 
                             if (isSameDirection) {
-                                // If they are in the same direction, they both bound the union the same way.
-                                // We keep one (from polygon A) to ensure the boundary exists but is not duplicated.
+                                // Same direction - keep one (from polygon A) to avoid duplication
                                 if (seg.origin === 'A') {
                                     keptSegs.push(seg);
                                 }
                             } else {
-                                // Opposite direction - internal shared edge. Cancel out completely.
-                                // But only if both segments are truly internal
-                                // If the edge is on the boundary of the union, we should keep it
-                                // Check if the edge is actually internal by testing a point slightly offset
-                                const offset = {
-                                    x: mid.x + (seg.p2.y - seg.p1.y) * 0.0001,
-                                    y: mid.y - (seg.p2.x - seg.p1.x) * 0.0001
+                                // Opposite direction - check if it's truly internal
+                                // Test a point slightly offset from the segment to see if it's inside both
+                                const offsetDir = {
+                                    x: (seg.p2.y - seg.p1.y) * 0.0001,
+                                    y: -(seg.p2.x - seg.p1.x) * 0.0001
                                 };
-                                const offsetRelationA = this.pointRelation(offset, polyA);
-                                const offsetRelationB = this.pointRelation(offset, polyB);
+                                const offsetPoint = {
+                                    x: this.getMidpoint(seg).x + offsetDir.x,
+                                    y: this.getMidpoint(seg).y + offsetDir.y
+                                };
+                                const offsetInA = this.pointRelation(offsetPoint, polyA);
+                                const offsetInB = this.pointRelation(offsetPoint, polyB);
+                                
                                 // If offset is inside both, it's truly internal - discard
-                                // Otherwise, keep one segment
-                                if (offsetRelationA === -1 && offsetRelationB === -1) {
+                                // Otherwise, it's on the boundary - keep one
+                                if (offsetInA === -1 && offsetInB === -1) {
                                     // Truly internal, discard
                                 } else {
                                     // On boundary, keep one
@@ -6999,49 +7046,20 @@
                             }
                             continue;
                         } else {
-                            // On boundary and NOT shared - must be part of the final outer boundary
+                            // Not shared - must be part of the union boundary
                             keptSegs.push(seg);
                         }
                     }
                 }
                 
-                // Debug: log segment counts
+                // If no segments kept, one polygon might be completely inside the other
                 if (keptSegs.length === 0) {
-                    console.warn('Union: No segments kept for union', {
-                        polyALength: polyA.length,
-                        polyBLength: polyB.length,
-                        allSegsCount: allSegs.length
-                    });
-                    // If no segments kept, polygons might be completely overlapping or one inside the other
-                    // This should have been handled above, but as a fallback, return the larger polygon
                     const areaA = Math.abs(this.getArea(polyA));
                     const areaB = Math.abs(this.getArea(polyB));
                     return areaA >= areaB ? [polyA] : [polyB];
                 }
                 
-                const cycles = this.linkSegments(keptSegs);
-                
-                // If no cycles found but we had segments, there might be an issue
-                // This could happen if segments don't form closed loops
-                if (!cycles || cycles.length === 0) {
-                    console.warn('Union: segments found but no cycles', {
-                        keptSegsCount: keptSegs.length,
-                        polyALength: polyA.length,
-                        polyBLength: polyB.length
-                    });
-                    // If we had segments but no cycles, try to create a bounding polygon as fallback
-                    // This handles cases where polygons are touching or have complex geometry
-                    const allVertices = [...polyA, ...polyB];
-                    const boundingPoly = this.createBoundingPolygon(allVertices);
-                    if (boundingPoly && boundingPoly.length >= 3) {
-                        console.warn('Union: Using bounding polygon fallback');
-                        return [boundingPoly];
-                    }
-                    // If bounding polygon also fails, return null
-                    return null;
-                }
-                
-                return cycles;
+                return this.linkSegments(keptSegs);
             }
             
             static getPolygonCenter(vertices) {
@@ -7115,7 +7133,6 @@
                 
                 return null;
             }
-            
 
             static getSegments(vertices) {
                 const segs = [];
@@ -7293,14 +7310,11 @@
                         }
 
                         if (closed && path.length >= 3) {
-                            // Keep all closed cycles - filter only truly degenerate ones
+                            // Keep cycles with positive area
+                            // Reduced threshold to handle small triangles and thin overlapping regions
                             const area = Math.abs(this.getArea(path));
-                            // Use a very small threshold to filter only degenerate cycles
-                            // This ensures valid small-area cycles (like thin triangles) are kept
-                            if (area > 1e-8) {
+                            if (area > 1e-6) { // Very small threshold to keep valid cycles
                                 cycles.push(path);
-                            } else {
-                                console.warn('Filtered degenerate cycle', { area, pathLength: path.length });
                             }
                         }
                     }
