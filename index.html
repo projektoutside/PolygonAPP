@@ -3517,20 +3517,70 @@
                 }
 
                 const polygonsToCombine = Array.from(this.combineSelection);
+                
+                // Validate that all polygons to combine still exist in the main array
+                const validPolygons = polygonsToCombine.filter(p => this.polygons.includes(p));
+                if (validPolygons.length !== polygonsToCombine.length) {
+                    console.warn('Some polygons to combine are no longer in the array');
+                    alert('Error: Some selected polygons are no longer available. Please try again.');
+                    this.exitCombineMode();
+                    return;
+                }
+
+                // Store original polygon count for validation
+                const originalCount = this.polygons.length;
+                const polygonsToRemove = new Set(this.combineSelection);
 
                 try {
                     const unionResultVertices = PolygonBoolean.union(polygonsToCombine);
 
-                    if (unionResultVertices && unionResultVertices.length >= 3) {
-                        // Success - create new polygon first
+                    // Validate union result more strictly
+                    if (unionResultVertices && 
+                        Array.isArray(unionResultVertices) && 
+                        unionResultVertices.length >= 3 &&
+                        unionResultVertices.every(v => v && typeof v.x === 'number' && typeof v.y === 'number')) {
+                        
+                        // Success - create new polygon first BEFORE removing old ones
                         const newPoly = new Polygon(unionResultVertices, this.currentColor);
                         newPoly.name = 'Combined Polygon ' + (this.polygons.length + 1);
 
-                        // Remove old polygons only after successful creation
-                        this.polygons = this.polygons.filter(p => !this.combineSelection.has(p));
+                        // Verify the new polygon is valid
+                        if (!newPoly.vertices || newPoly.vertices.length < 3) {
+                            throw new Error('Combined polygon is invalid');
+                        }
+
+                        // Remove old polygons only after successful creation and validation
+                        this.polygons = this.polygons.filter(p => !polygonsToRemove.has(p));
+
+                        // Verify polygons were actually removed
+                        if (this.polygons.length !== originalCount - polygonsToRemove.size) {
+                            console.error('Polygon removal count mismatch', {
+                                original: originalCount,
+                                removed: polygonsToRemove.size,
+                                expected: originalCount - polygonsToRemove.size,
+                                actual: this.polygons.length
+                            });
+                            // Restore polygons if removal failed
+                            this.polygons = [...this.polygons, ...polygonsToCombine];
+                            throw new Error('Failed to remove original polygons correctly');
+                        }
 
                         // Add new polygon
                         this.polygons.push(newPoly);
+
+                        // Verify final count is correct
+                        if (this.polygons.length !== originalCount - polygonsToRemove.size + 1) {
+                            console.error('Final polygon count mismatch', {
+                                original: originalCount,
+                                removed: polygonsToRemove.size,
+                                expected: originalCount - polygonsToRemove.size + 1,
+                                actual: this.polygons.length
+                            });
+                            // Restore original state
+                            this.polygons = this.polygons.filter(p => p !== newPoly);
+                            this.polygons = [...this.polygons, ...polygonsToCombine];
+                            throw new Error('Final polygon count is incorrect');
+                        }
 
                         this.selectedPolygon = newPoly;
                         this.saveHistory(); // Save AFTER modification
@@ -3539,20 +3589,28 @@
                         this.exitCombineMode();
                         this.setTool('select');
                         this.render();
-
-                        // Show success feedback?
                     } else {
                         // Don't remove polygons if union failed
-                        alert('Could not combine polygons. Ensure they overlap and form a valid shape.');
                         console.warn('Union failed - polygons preserved', {
                             polygonsToCombine: polygonsToCombine.length,
-                            result: unionResultVertices
+                            result: unionResultVertices,
+                            resultType: typeof unionResultVertices,
+                            resultLength: unionResultVertices ? unionResultVertices.length : 'null/undefined'
                         });
+                        alert('Could not combine polygons. Ensure they overlap and form a valid shape.');
                     }
                 } catch (e) {
                     console.error('Error combining polygons:', e);
-                    alert('Error combining polygons: ' + e.message);
-                    // Don't remove polygons on error
+                    alert('Error combining polygons: ' + (e.message || e.toString()));
+                    // Ensure polygons are not removed on error
+                    // Re-add any polygons that might have been removed
+                    const currentPolygons = new Set(this.polygons);
+                    const missingPolygons = polygonsToCombine.filter(p => !currentPolygons.has(p));
+                    if (missingPolygons.length > 0) {
+                        console.warn('Restoring missing polygons after error', missingPolygons.length);
+                        this.polygons = [...this.polygons, ...missingPolygons];
+                        this.render();
+                    }
                 }
             }
 
@@ -6609,10 +6667,24 @@
                 return this.pointRelation(p, vertices) === -1;
             }
             static union(polygons) {
-                if (polygons.length < 2) return null;
+                if (!polygons || polygons.length < 2) {
+                    console.warn('Union requires at least 2 polygons');
+                    return null;
+                }
+
+                // Validate all input polygons have valid vertices
+                for (let i = 0; i < polygons.length; i++) {
+                    if (!polygons[i] || !polygons[i].vertices || polygons[i].vertices.length < 3) {
+                        console.warn(`Polygon ${i} is invalid for union`, polygons[i]);
+                        return null;
+                    }
+                }
 
                 let result = this.cleanPolygon(polygons[0].vertices);
-                if (!result || result.length < 3) return null;
+                if (!result || result.length < 3) {
+                    console.warn('First polygon cleaning failed');
+                    return null;
+                }
 
                 for (let i = 1; i < polygons.length; i++) {
                     const clip = this.cleanPolygon(polygons[i].vertices);
@@ -6620,15 +6692,26 @@
 
                     const combinedCycles = this.unionTwoPolygons(result, clip);
 
-                    if (combinedCycles && combinedCycles.length > 0) {
+                    if (combinedCycles && Array.isArray(combinedCycles) && combinedCycles.length > 0) {
                         // Get only the outer boundary cycle (largest area, containing all others)
                         const outerBoundary = this.getOuterBoundary(combinedCycles);
-                        if (outerBoundary && outerBoundary.length >= 3) {
-                            result = outerBoundary;
+                        if (outerBoundary && Array.isArray(outerBoundary) && outerBoundary.length >= 3) {
+                            // Validate the outer boundary has valid vertices
+                            const hasValidVertices = outerBoundary.every(v => 
+                                v && typeof v.x === 'number' && typeof v.y === 'number' && 
+                                isFinite(v.x) && isFinite(v.y)
+                            );
+                            if (hasValidVertices) {
+                                result = outerBoundary;
+                            } else {
+                                console.warn('Union failed: outer boundary has invalid vertices');
+                                return null;
+                            }
                         } else {
                             // If getOuterBoundary fails, the union operation failed
                             console.warn('Union failed: could not determine outer boundary', {
-                                cyclesCount: combinedCycles.length
+                                cyclesCount: combinedCycles.length,
+                                outerBoundary: outerBoundary ? outerBoundary.length : 'null'
                             });
                             return null;
                         }
@@ -6669,7 +6752,16 @@
                     }
                 }
 
-                return result && result.length >= 3 ? result : null;
+                // Final validation of result
+                if (result && Array.isArray(result) && result.length >= 3) {
+                    // Validate all vertices are valid
+                    const hasValidVertices = result.every(v => 
+                        v && typeof v.x === 'number' && typeof v.y === 'number' && 
+                        isFinite(v.x) && isFinite(v.y)
+                    );
+                    return hasValidVertices ? result : null;
+                }
+                return null;
             }
 
             // Get the outer boundary cycle from multiple cycles, discarding internal ones
