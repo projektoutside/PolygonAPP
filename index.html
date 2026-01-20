@@ -354,9 +354,10 @@
         }
 
         /* Adjust header content when back button exists */
-        .panel-header .panel-back-btn + span,
-        .panel-header .panel-back-btn ~ span {
-            margin-left: 60px; /* Offset for back button on left */
+        .panel-header .panel-back-btn+span,
+        .panel-header .panel-back-btn~span {
+            margin-left: 60px;
+            /* Offset for back button on left */
         }
 
         .panel-header.dragging {
@@ -370,7 +371,8 @@
 
         /* Back Button for Mobile Panels */
         .panel-back-btn {
-            display: none; /* Hidden on desktop */
+            display: none;
+            /* Hidden on desktop */
             background: rgba(255, 255, 255, 0.2);
             border: none;
             color: white;
@@ -1693,7 +1695,7 @@
             .mobile-menu-toggle {
                 pointer-events: auto;
             }
-            
+
             /* Make sure canvas container allows pointer events through except for buttons */
             #canvasContainer {
                 position: relative;
@@ -1962,15 +1964,18 @@
                     <!-- Layers Panel -->
                     <div class="panel-header">
                         <button class="panel-back-btn" id="layersBackBtn" aria-label="Close Layers Panel">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M19 12H5M12 19l-7-7 7-7"/>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M19 12H5M12 19l-7-7 7-7" />
                             </svg>
                         </button>
                         <span>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 6px;">
-                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                <rect x="7" y="7" width="10" height="10" rx="1" ry="1"/>
-                                <rect x="11" y="11" width="6" height="6" rx="0.5" ry="0.5"/>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                style="display: inline-block; vertical-align: middle; margin-right: 6px;">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                <rect x="7" y="7" width="10" height="10" rx="1" ry="1" />
+                                <rect x="11" y="11" width="6" height="6" rx="0.5" ry="0.5" />
                             </svg>
                             Layers
                         </span>
@@ -2055,8 +2060,9 @@
                 <div class="panel">
                     <div class="panel-header">
                         <button class="panel-back-btn" id="visualizersBackBtn" aria-label="Close Visualizers Panel">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M19 12H5M12 19l-7-7 7-7"/>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M19 12H5M12 19l-7-7 7-7" />
                             </svg>
                         </button>
                         <span>👁️ Visualizers</span>
@@ -2111,7 +2117,8 @@
             </div>
             <div class="bottom-panel-content" id="propertiesPanelContent">
                 <div class="property-row" style="justify-content: center; padding: 12px;">
-                    <span class="property-label" style="color: #94a3b8; font-style: italic;">Select a polygon to view properties</span>
+                    <span class="property-label" style="color: #94a3b8; font-style: italic;">Select a polygon to view
+                        properties</span>
                 </div>
             </div>
         </div>
@@ -2549,9 +2556,12 @@
                 // Grid optimization state
                 this.gridCache = null;
                 this.lastGridState = null; // Track grid state to avoid unnecessary redraws
+                this.gridViewBounds = null; // Cache view bounds for grid
+                this.gridNeedsRedraw = true; // Flag to track if grid needs redraw
                 this.renderScheduled = false; // Throttle render calls
                 this.lastRenderTime = 0;
                 this.renderThrottleMs = 16; // ~60fps max render rate
+                this.renderAnimationFrameId = null; // Track RAF for cleanup
 
                 this.init();
             }
@@ -2572,11 +2582,17 @@
                 this.setupResponsiveHandlers();
 
                 // Ensure layout is settled before creating polygon so it is perfectly centered
+                // Use multiple RAF calls to ensure canvas is fully sized and ready
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
-                        this.resizeCanvas();
-                        this.createSamplePolygon();
-                        this.render();
+                        // First, ensure canvas is properly sized
+                        this.syncResize(false); // Don't compensate pan on initial resize
+                        requestAnimationFrame(() => {
+                            // Now create the polygon and render
+                            this.createSamplePolygon();
+                            // Force a render to ensure everything is visible
+                            this.render(true);
+                        });
                     });
                 });
 
@@ -2588,23 +2604,34 @@
             }
 
             setupResponsiveHandlers() {
-                // Handle device resize
+                // Debounced resize handler to prevent excessive calls
+                let resizeTimeout;
+                const handleResize = () => {
+                    clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => {
+                        this.handleViewportChange();
+                        this.resizeCanvas();
+                    }, 150); // Debounce resize operations
+                };
+
+                // Handle device resize (from DeviceDetector)
                 window.addEventListener('deviceResize', (e) => {
                     this.deviceInfo = e.detail;
-                    this.handleViewportChange();
+                    handleResize();
                 });
 
                 // Handle orientation change
                 window.addEventListener('deviceOrientationChange', (e) => {
                     this.deviceInfo = e.detail;
-                    this.handleViewportChange();
-                    this.resizeCanvas();
+                    // Use longer timeout for orientation change to ensure layout is stable
+                    setTimeout(() => {
+                        this.handleViewportChange();
+                        this.resizeCanvas();
+                    }, 200);
                 });
 
-                // Handle window resize
-                window.addEventListener('resize', () => {
-                    this.handleViewportChange();
-                });
+                // Handle window resize (consolidated handler)
+                window.addEventListener('resize', handleResize);
 
                 // Initial viewport setup
                 this.handleViewportChange();
@@ -2790,7 +2817,7 @@
 
             setupCanvas() {
                 this.resizeCanvas();
-                window.addEventListener('resize', () => this.resizeCanvas());
+                // Note: Resize handler is managed in setupResponsiveHandlers to avoid duplicates
             }
 
             syncResize(compensatePan = false) {
@@ -2847,8 +2874,14 @@
                 // Use requestAnimationFrame for smooth resizing
                 requestAnimationFrame(() => {
                     // This is an intentional resize, so compensate pan
-                    this.syncResize(true);
-                    this.render();
+                    const didResize = this.syncResize(true);
+                    // Mark grid for redraw on resize
+                    this.gridNeedsRedraw = true;
+                    this.lastGridState = null;
+                    // Only render if resize actually happened
+                    if (didResize) {
+                        this.render();
+                    }
                 });
             }
 
@@ -3363,10 +3396,12 @@
 
             createSamplePolygon() {
                 // Reset pan and zoom to ensure consistent initial state
+                // World origin (0,0) appears at screen center when pan is (0,0) and zoom is 1
                 this.pan = { x: 0, y: 0 };
                 this.zoom = 1;
 
                 // Create a triangle at world origin (0,0) snapped to grid
+                // The triangle will be centered on the screen since pan is (0,0)
                 const centerX = 0;
                 const centerY = 0;
 
@@ -3385,14 +3420,12 @@
                 // Select the default polygon so properties are visible immediately
                 this.selectedPolygon = triangle;
 
-                // Center the view on the triangle
-                const triangleCenter = this.getPolygonCenter(triangle);
-                this.centerViewOn(triangleCenter.x, triangleCenter.y);
-
+                // Mark grid for redraw since we changed selection
+                this.markGridForRedraw();
+                
                 this.saveHistory();
                 this.updateProperties();
                 this.updateLayers();
-                this.render();
             }
 
             handleCombineToolClick() {
@@ -3492,10 +3525,10 @@
                         // Success - create new polygon first
                         const newPoly = new Polygon(unionResultVertices, this.currentColor);
                         newPoly.name = 'Combined Polygon ' + (this.polygons.length + 1);
-                        
+
                         // Remove old polygons only after successful creation
                         this.polygons = this.polygons.filter(p => !this.combineSelection.has(p));
-                        
+
                         // Add new polygon
                         this.polygons.push(newPoly);
 
@@ -3747,17 +3780,31 @@
 
             snapToGrid(point) {
                 if (!this.gridSnap || !point) return point;
-                
+
+                // Validate gridSize
+                if (!this.gridSize || this.gridSize <= 0 || !isFinite(this.gridSize)) {
+                    return point;
+                }
+
                 // Use epsilon for floating point precision to avoid rounding errors
                 const epsilon = 1e-10;
-                const snappedX = Math.round((point.x + epsilon) / this.gridSize) * this.gridSize;
-                const snappedY = Math.round((point.y + epsilon) / this.gridSize) * this.gridSize;
-                
-                // Round to avoid floating point artifacts
+                const gridSizeInv = 1 / this.gridSize;
+
+                // Optimized snapping calculation
+                const snappedX = Math.round((point.x + epsilon) * gridSizeInv) * this.gridSize;
+                const snappedY = Math.round((point.y + epsilon) * gridSizeInv) * this.gridSize;
+
+                // Round to avoid floating point artifacts (higher precision for better accuracy)
                 return {
-                    x: Math.round(snappedX * 1000) / 1000,
-                    y: Math.round(snappedY * 1000) / 1000
+                    x: Math.round(snappedX * 10000) / 10000,
+                    y: Math.round(snappedY * 10000) / 10000
                 };
+            }
+
+            // Helper function to mark grid for redraw when state changes
+            markGridForRedraw() {
+                this.gridNeedsRedraw = true;
+                this.lastGridState = null;
             }
 
             // Get the center of the current viewport in world coordinates, snapped to grid
@@ -3957,6 +4004,8 @@
                     this.pan.y += y - this.dragStart.y;
                     this.dragStart = { x, y };
                     this.canvas.style.cursor = 'grabbing';
+                    // Mark grid for redraw on pan
+                    this.gridNeedsRedraw = true;
                     this.render(true); // Force render during pan
                     return;
                 }
@@ -4066,6 +4115,9 @@
                 this.pan.x += (worldAfter.x - worldBefore.x) * this.zoom;
                 this.pan.y += (worldAfter.y - worldBefore.y) * this.zoom;
 
+                // Mark grid for redraw on zoom/pan change
+                this.gridNeedsRedraw = true;
+                this.lastGridState = null; // Force grid state recalculation
                 this.render(true); // Force render during zoom for smooth experience
             }
 
@@ -4233,6 +4285,9 @@
                     if (this.pinchDistance > 0) {
                         const scale = distance / this.pinchDistance;
                         this.zoom = Math.max(0.1, Math.min(5, this.pinchZoom * scale));
+                        // Mark grid for redraw on zoom
+                        this.gridNeedsRedraw = true;
+                        this.lastGridState = null;
                         this.render(true); // Force render during pinch zoom for smooth experience
                     }
                     return;
@@ -4353,7 +4408,7 @@
                     // Use panStartPos which is always in screen coordinates
                     const dx = x - this.panStartPos.x;
                     const dy = y - this.panStartPos.y;
-                    
+
                     // Safety check: prevent huge jumps that indicate coordinate system error
                     // If delta is too large (>500px), something is wrong - reset panStartPos
                     const deltaMagnitude = Math.sqrt(dx * dx + dy * dy);
@@ -4363,20 +4418,22 @@
                         this.render(true);
                         return;
                     }
-                    
+
                     // Prevent extreme pan values that could cause viewport jumping
                     const maxPan = 10000; // Reasonable maximum pan value
                     const newPanX = this.pan.x + dx;
                     const newPanY = this.pan.y + dy;
-                    
+
                     // Clamp pan values to prevent viewport jumping
                     if (Math.abs(newPanX) < maxPan && Math.abs(newPanY) < maxPan) {
                         this.pan.x = newPanX;
                         this.pan.y = newPanY;
                     }
-                    
+
                     // Update panStartPos for next frame (screen coordinates)
                     this.panStartPos = { x, y };
+                    // Mark grid for redraw on pan
+                    this.gridNeedsRedraw = true;
                     this.render(true); // Force render during pan
                     return;
                 }
@@ -4441,7 +4498,7 @@
                 }
 
                 // If we tapped (didn't pan or drag), handle tap for deselection
-                if (this.touchStartPos && !this.isPanning && !this.isDragging && 
+                if (this.touchStartPos && !this.isPanning && !this.isDragging &&
                     this.currentTool === 'select' && finalMoveDistance <= this.touchTapThreshold) {
                     const touch = e.changedTouches[0];
                     if (touch) {
@@ -4770,15 +4827,23 @@
             render(force = false) {
                 // Throttle render calls for better performance
                 const now = performance.now();
+
+                // Cancel any pending render if a new one is requested
+                if (this.renderAnimationFrameId !== null) {
+                    cancelAnimationFrame(this.renderAnimationFrameId);
+                    this.renderAnimationFrameId = null;
+                }
+
                 if (!force && this.renderScheduled) {
                     return;
                 }
-                
+
                 if (!force && (now - this.lastRenderTime) < this.renderThrottleMs) {
                     if (!this.renderScheduled) {
                         this.renderScheduled = true;
-                        requestAnimationFrame(() => {
+                        this.renderAnimationFrameId = requestAnimationFrame(() => {
                             this.renderScheduled = false;
+                            this.renderAnimationFrameId = null;
                             this.render(true);
                         });
                     }
@@ -4802,7 +4867,7 @@
                 this.ctx.translate(cssWidth / 2 + this.pan.x, cssHeight / 2 + this.pan.y);
                 this.ctx.scale(this.zoom, this.zoom);
 
-                // Draw grid
+                // Draw grid (always draw to ensure visibility)
                 this.drawGrid();
 
                 // Draw visualizers
@@ -4812,7 +4877,8 @@
 
                 // Draw polygons
                 for (let poly of this.polygons) {
-                    if (!poly.visible) continue;
+                    // Ensure polygon is visible (default to true if property doesn't exist)
+                    if (poly.visible === false) continue;
                     let isSelected = poly === this.selectedPolygon;
 
                     // Highlight polygons selected for combination OR the primary selection in Split mode
@@ -4871,35 +4937,88 @@
                     return;
                 }
 
+                // Calculate view bounds with improved precision
+                const halfWidth = cssWidth / 2;
+                const halfHeight = cssHeight / 2;
+                const zoomInv = 1 / this.zoom;
+                const panXZoom = this.pan.x * zoomInv;
+                const panYZoom = this.pan.y * zoomInv;
+
                 const viewBounds = {
-                    left: -cssWidth / (2 * this.zoom) - this.pan.x / this.zoom,
-                    right: cssWidth / (2 * this.zoom) - this.pan.x / this.zoom,
-                    top: -cssHeight / (2 * this.zoom) - this.pan.y / this.zoom,
-                    bottom: cssHeight / (2 * this.zoom) - this.pan.y / this.zoom
+                    left: -halfWidth * zoomInv - panXZoom,
+                    right: halfWidth * zoomInv - panXZoom,
+                    top: -halfHeight * zoomInv - panYZoom,
+                    bottom: halfHeight * zoomInv - panYZoom
                 };
+
+                // Check if grid state changed (for caching optimization)
+                const currentGridState = {
+                    gridSize: this.gridSize,
+                    zoom: this.zoom,
+                    panX: Math.round(this.pan.x * 100) / 100,
+                    panY: Math.round(this.pan.y * 100) / 100,
+                    selectedPolygon: !!this.selectedPolygon,
+                    cssWidth: Math.round(cssWidth),
+                    cssHeight: Math.round(cssHeight)
+                };
+
+                // Only redraw if grid state changed significantly
+                // Always draw on first render (when lastGridState is null)
+                if (this.lastGridState) {
+                    const stateChanged =
+                        Math.abs(currentGridState.gridSize - this.lastGridState.gridSize) > 0.01 ||
+                        Math.abs(currentGridState.zoom - this.lastGridState.zoom) > 0.01 ||
+                        Math.abs(currentGridState.panX - this.lastGridState.panX) > 0.1 ||
+                        Math.abs(currentGridState.panY - this.lastGridState.panY) > 0.1 ||
+                        currentGridState.selectedPolygon !== this.lastGridState.selectedPolygon ||
+                        currentGridState.cssWidth !== this.lastGridState.cssWidth ||
+                        currentGridState.cssHeight !== this.lastGridState.cssHeight;
+
+                    if (!stateChanged && !this.gridNeedsRedraw) {
+                        return; // Skip redraw if state hasn't changed
+                    }
+                }
+                // If lastGridState is null, this is the first render - always draw
+
+                this.lastGridState = currentGridState;
+                this.gridViewBounds = viewBounds;
+                this.gridNeedsRedraw = false;
 
                 // Calculate effective grid size in screen pixels for adaptive rendering
                 const gridSizeScreen = this.gridSize * this.zoom;
-                
-                // Adaptive grid density: skip drawing if grid is too dense or too sparse
+
+                // Adaptive grid density: optimize rendering based on zoom level
                 // Skip if grid lines are less than 2 pixels apart (too dense)
                 if (gridSizeScreen < 2) {
-                    // Draw major grid lines only (every 5th or 10th line)
-                    const majorGridMultiplier = gridSizeScreen < 0.5 ? 20 : 10;
+                    // Draw major grid lines only with adaptive spacing
+                    let majorGridMultiplier;
+                    if (gridSizeScreen < 0.3) {
+                        majorGridMultiplier = 50; // Very zoomed out - show every 50th line
+                    } else if (gridSizeScreen < 0.5) {
+                        majorGridMultiplier = 20; // Zoomed out - show every 20th line
+                    } else if (gridSizeScreen < 1) {
+                        majorGridMultiplier = 10; // Moderately zoomed out - show every 10th line
+                    } else {
+                        majorGridMultiplier = 5; // Slightly zoomed out - show every 5th line
+                    }
                     this.drawGridLines(viewBounds, this.gridSize * majorGridMultiplier, true);
                     return;
                 }
-                
+
                 // Skip if grid lines are more than 200 pixels apart (too sparse)
                 if (gridSizeScreen > 200) {
-                    // Draw sub-grid lines for better visibility
+                    // Draw sub-grid lines for better visibility when zoomed in
                     const subGridSize = this.gridSize / 5;
-                    this.drawGridLines(viewBounds, subGridSize, false);
+                    // Only draw sub-grid if it's visible (not too small)
+                    if (subGridSize * this.zoom > 1) {
+                        this.drawGridLines(viewBounds, subGridSize, false);
+                    }
                     this.drawGridLines(viewBounds, this.gridSize, true);
                     return;
                 }
 
                 // Normal grid rendering - optimized batch drawing
+                // For optimal visibility, always draw the main grid
                 this.drawGridLines(viewBounds, this.gridSize, false);
             }
 
@@ -4910,61 +5029,84 @@
                 }
 
                 // Make grid more visible when nothing is selected
-                const gridColor = this.selectedPolygon 
-                    ? (isMajor ? '#d0d0d0' : '#e8e8e8') 
-                    : (isMajor ? '#c0c0c0' : '#d8d8d8');
-                
-                this.ctx.strokeStyle = gridColor;
-                this.ctx.lineWidth = isMajor 
-                    ? (this.selectedPolygon ? (1.2 / this.zoom) : (1.5 / this.zoom))
-                    : (this.selectedPolygon ? (0.8 / this.zoom) : (1 / this.zoom));
+                // Enhanced contrast for better visibility
+                const gridColor = this.selectedPolygon
+                    ? (isMajor ? '#d0d0d0' : '#e8e8e8')
+                    : (isMajor ? '#b0b0b0' : '#d0d0d0'); // Darker when nothing selected for better visibility
 
-                // Calculate grid line bounds with proper rounding and safety checks
-                const startX = Math.floor(viewBounds.left / gridSize) * gridSize;
-                const endX = Math.ceil(viewBounds.right / gridSize) * gridSize;
-                const startY = Math.floor(viewBounds.top / gridSize) * gridSize;
-                const endY = Math.ceil(viewBounds.bottom / gridSize) * gridSize;
+                // Optimize line width calculation
+                const zoomInv = 1 / this.zoom;
+                const baseLineWidth = isMajor ? (this.selectedPolygon ? 1.2 : 1.5) : (this.selectedPolygon ? 0.8 : 1.0);
+                const lineWidth = baseLineWidth * zoomInv;
+
+                // Clamp line width to reasonable bounds for performance
+                const clampedLineWidth = Math.max(0.5, Math.min(2.0, lineWidth));
+
+                this.ctx.strokeStyle = gridColor;
+                this.ctx.lineWidth = clampedLineWidth;
+
+                // Calculate grid line bounds with improved precision and safety checks
+                // Use epsilon to handle edge cases near zero
+                const epsilon = 1e-10;
+                const startX = Math.floor((viewBounds.left - epsilon) / gridSize) * gridSize;
+                const endX = Math.ceil((viewBounds.right + epsilon) / gridSize) * gridSize;
+                const startY = Math.floor((viewBounds.top - epsilon) / gridSize) * gridSize;
+                const endY = Math.ceil((viewBounds.bottom + epsilon) / gridSize) * gridSize;
 
                 // Safety check: ensure bounds are valid
                 if (!isFinite(startX) || !isFinite(endX) || !isFinite(startY) || !isFinite(endY)) {
                     return;
                 }
 
-                // Limit number of lines to prevent performance issues
-                const maxLines = 500;
+                // Limit number of lines to prevent performance issues (increased limit for better quality)
+                const maxLines = 800; // Increased from 500 for better grid visibility
                 const numVerticalLines = Math.floor((endX - startX) / gridSize) + 1;
                 const numHorizontalLines = Math.floor((endY - startY) / gridSize) + 1;
 
-                if (numVerticalLines > maxLines || numHorizontalLines > maxLines || 
+                if (numVerticalLines > maxLines || numHorizontalLines > maxLines ||
                     numVerticalLines < 0 || numHorizontalLines < 0) {
                     // Too many lines or invalid count - skip drawing to prevent lag
+                    // Draw only major lines in this case
+                    if (isMajor) {
+                        const majorSpacing = Math.max(gridSize * 5, (endX - startX) / 50);
+                        this.drawGridLines(viewBounds, majorSpacing, true);
+                    }
                     return;
                 }
 
-                // Batch draw vertical lines for better performance
+                // Optimize: Batch draw vertical lines for better performance
                 this.ctx.beginPath();
-                for (let x = startX; x <= endX; x += gridSize) {
-                    // Use epsilon to handle floating point precision
-                    const xPos = Math.round(x * 1000) / 1000;
-                    this.ctx.moveTo(xPos, viewBounds.top);
-                    this.ctx.lineTo(xPos, viewBounds.bottom);
+                // Pre-calculate rounded positions to avoid repeated calculations
+                const verticalLineCount = Math.floor((endX - startX) / gridSize) + 1;
+                if (verticalLineCount > 0 && verticalLineCount <= maxLines) {
+                    for (let i = 0; i <= verticalLineCount; i++) {
+                        const x = startX + i * gridSize;
+                        // Use precise rounding to avoid floating point artifacts
+                        const xPos = Math.round(x * 10000) / 10000;
+                        this.ctx.moveTo(xPos, viewBounds.top);
+                        this.ctx.lineTo(xPos, viewBounds.bottom);
+                    }
                 }
                 this.ctx.stroke();
 
                 // Batch draw horizontal lines for better performance
                 this.ctx.beginPath();
-                for (let y = startY; y <= endY; y += gridSize) {
-                    // Use epsilon to handle floating point precision
-                    const yPos = Math.round(y * 1000) / 1000;
-                    this.ctx.moveTo(viewBounds.left, yPos);
-                    this.ctx.lineTo(viewBounds.right, yPos);
+                const horizontalLineCount = Math.floor((endY - startY) / gridSize) + 1;
+                if (horizontalLineCount > 0 && horizontalLineCount <= maxLines) {
+                    for (let i = 0; i <= horizontalLineCount; i++) {
+                        const y = startY + i * gridSize;
+                        // Use precise rounding to avoid floating point artifacts
+                        const yPos = Math.round(y * 10000) / 10000;
+                        this.ctx.moveTo(viewBounds.left, yPos);
+                        this.ctx.lineTo(viewBounds.right, yPos);
+                    }
                 }
                 this.ctx.stroke();
 
-                // Draw axes only for major grid
-                if (isMajor && gridSize === this.gridSize) {
-                    this.ctx.strokeStyle = '#999';
-                    this.ctx.lineWidth = 2 / this.zoom;
+                // Draw axes only for major grid with enhanced visibility
+                if (isMajor && Math.abs(gridSize - this.gridSize) < 0.01) {
+                    this.ctx.strokeStyle = this.selectedPolygon ? '#888' : '#777'; // Darker when nothing selected
+                    this.ctx.lineWidth = Math.max(1.5, Math.min(3.0, 2 * zoomInv));
 
                     // X-axis
                     this.ctx.beginPath();
@@ -5364,7 +5506,7 @@
                     this.ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
 
                     const vertices = poly.vertices;
-                    
+
                     // Draw all diagonals: connect vertex i to vertex j where j is at least 2 positions away
                     // This ensures we don't draw edges (adjacent vertices)
                     for (let i = 0; i < vertices.length; i++) {
@@ -5693,6 +5835,9 @@
                 if (toggle) {
                     toggle.classList.toggle('active');
                 }
+                // Mark grid for redraw
+                this.gridNeedsRedraw = true;
+                this.lastGridState = null; // Force grid state recalculation
                 // Trigger render to update grid appearance if needed
                 this.render(true);
             }
@@ -5803,17 +5948,23 @@
             // Zoom functions
             zoomIn() {
                 this.zoom = Math.min(5, this.zoom * 1.2);
+                this.gridNeedsRedraw = true;
+                this.lastGridState = null; // Force grid state recalculation
                 this.render();
             }
 
             zoomOut() {
                 this.zoom = Math.max(0.1, this.zoom / 1.2);
+                this.gridNeedsRedraw = true;
+                this.lastGridState = null; // Force grid state recalculation
                 this.render();
             }
 
             zoomReset() {
                 this.zoom = 1;
                 this.pan = { x: 0, y: 0 };
+                this.gridNeedsRedraw = true;
+                this.lastGridState = null; // Force grid state recalculation
                 this.render();
             }
 
@@ -6052,7 +6203,7 @@
             const deviceInfo = deviceDetector ? deviceDetector.getInfo() : { isMobile: false, isTablet: false };
             const isMobile = deviceInfo.isMobile || window.innerWidth <= 768;
             const isTablet = deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024);
-            
+
             // Enable for mobile and tablet devices
             if (isMobile || isTablet) {
                 const wasOpen = sidebar.classList.contains('mobile-open');
@@ -6107,7 +6258,7 @@
                 // Remove any existing listeners to prevent duplicates
                 const newLayersBtn = layersBackBtn.cloneNode(true);
                 layersBackBtn.parentNode.replaceChild(newLayersBtn, layersBackBtn);
-                
+
                 newLayersBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     e.preventDefault();
@@ -6116,7 +6267,7 @@
                         const deviceInfo = deviceDetector ? deviceDetector.getInfo() : { isMobile: false, isTablet: false };
                         const isMobile = deviceInfo.isMobile || window.innerWidth <= 768;
                         const isTablet = deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024);
-                        
+
                         if (isMobile) {
                             // On mobile, close the overlay
                             closeMobileSidebars();
@@ -6134,7 +6285,7 @@
                 // Remove any existing listeners to prevent duplicates
                 const newVisualizersBtn = visualizersBackBtn.cloneNode(true);
                 visualizersBackBtn.parentNode.replaceChild(newVisualizersBtn, visualizersBackBtn);
-                
+
                 newVisualizersBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     e.preventDefault();
@@ -6143,7 +6294,7 @@
                         const deviceInfo = deviceDetector ? deviceDetector.getInfo() : { isMobile: false, isTablet: false };
                         const isMobile = deviceInfo.isMobile || window.innerWidth <= 768;
                         const isTablet = deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024);
-                        
+
                         if (isMobile) {
                             // On mobile, close the overlay
                             closeMobileSidebars();
@@ -6161,18 +6312,18 @@
             const deviceInfo = deviceDetector ? deviceDetector.getInfo() : { isMobile: false, isTablet: false };
             const isMobile = deviceInfo.isMobile || window.innerWidth <= 768;
             const isTablet = deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024);
-            
+
             // Show toggle buttons on mobile (required) and optionally on tablets (for overlay mode)
             if (isMobile || isTablet) {
                 // Add menu toggle buttons to canvas container
                 const canvasContainer = document.getElementById('canvasContainer');
-                
+
                 // Calculate position below toolbar
                 // Top tools bar height + Toolbar height + small gap
                 const topToolsBar = document.querySelector('.top-tools-bar');
                 const toolbar = document.querySelector('.toolbar');
                 let topOffset = 12; // Default gap
-                
+
                 if (topToolsBar && toolbar) {
                     const topToolsBarHeight = topToolsBar.getBoundingClientRect().height;
                     const toolbarHeight = toolbar.getBoundingClientRect().height;
@@ -6182,8 +6333,8 @@
                     // Top tools bar: clamp(48px, 6vw, 56px) + mobile offset clamp(10px, 2vw, 15px)
                     // Toolbar: clamp(48px, 6vw, 56px) to clamp(60px, 8vw, 70px)
                     const viewportWidth = window.innerWidth;
-                    const topBarHeight = Math.max(48, Math.min(56, viewportWidth * 0.06)) + 
-                                        (viewportWidth <= 768 ? Math.max(10, Math.min(15, viewportWidth * 0.02)) : 0);
+                    const topBarHeight = Math.max(48, Math.min(56, viewportWidth * 0.06)) +
+                        (viewportWidth <= 768 ? Math.max(10, Math.min(15, viewportWidth * 0.02)) : 0);
                     const toolbarHeight = Math.max(48, Math.min(70, viewportWidth * 0.08));
                     topOffset = topBarHeight + toolbarHeight + 8;
                 }
@@ -6241,7 +6392,7 @@
         window.addEventListener('load', () => {
             // Initialize device detector first
             deviceDetector = new DeviceDetector();
-            
+
             // Setup panel back buttons
             setupPanelBackButtons();
 
@@ -6416,7 +6567,7 @@
             static getIntersectionInfiniteLine(seg, line) {
                 // Line: p1, p2. Seg: p3, p4
                 const x1 = line.p1.x, y1 = line.p1.y;
-                x2 = line.p2.x, y2 = line.p2.y;
+                const x2 = line.p2.x, y2 = line.p2.y;
                 const x3 = seg.p1.x, y3 = seg.p1.y;
                 const x4 = seg.p2.x, y4 = seg.p2.y;
 
@@ -6471,7 +6622,7 @@
                         // But since unionTwoPolygons returned nothing, they might be too far apart
                         // In this case, we'll try to create a bounding polygon
                         console.warn('Union returned no cycles - polygons may be disjoint');
-                        
+
                         // Check if polygons overlap by testing if any vertex of one is inside the other
                         let hasOverlap = false;
                         for (let v of clip) {
@@ -6488,7 +6639,7 @@
                                 }
                             }
                         }
-                        
+
                         if (!hasOverlap) {
                             // Polygons are disjoint - return null to indicate failure
                             // User should ensure polygons overlap for union
@@ -6937,7 +7088,6 @@
             }
         }
 
-        // Initialize the application once the DOM is fully loaded
         // Setup back buttons when DOM is ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', setupPanelBackButtons);
@@ -6945,23 +7095,7 @@
             // DOM already loaded
             setupPanelBackButtons();
         }
-
-        // Initialize the application once the DOM is fully loaded
-        document.addEventListener('DOMContentLoaded', () => {
-            // Instantiate global objects
-            deviceDetector = new DeviceDetector();
-            const playground = new PolygonPlayground();
-
-            // Expose for debugging if needed
-            window.polygonApp = playground;
-        });
     </script>
 </body>
-
-</html>
-
-</html>
-
-</html>
 
 </html>
