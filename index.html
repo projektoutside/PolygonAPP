@@ -221,20 +221,16 @@
         /* Main Layout - Fully Responsive */
         .app-container {
             display: flex;
-            width: 100%;
-            max-width: 100vw;
-            /* Height: 100vh - (Top Bar + Toolbar + Margins) */
-            height: calc(100vh - (clamp(36px, 4.5vw, 44px) * 2 + clamp(8px, 2vw, 16px)));
-            height: calc(100dvh - (clamp(36px, 4.5vw, 44px) * 2 + clamp(8px, 2vw, 16px)));
-            max-height: calc(100vh - (clamp(36px, 4.5vw, 44px) * 2 + clamp(8px, 2vw, 16px)));
-            max-height: calc(100dvh - (clamp(36px, 4.5vw, 44px) * 2 + clamp(8px, 2vw, 16px)));
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            max-width: 100%;
+            max-height: none;
             background: var(--color-bg);
-            border-radius: calc(var(--radius-lg) * 1.5);
-            margin: clamp(4px, 1vw, 8px);
-            /* Margin Top: TopBar + Toolbar + spacing */
-            margin-top: calc(clamp(4px, 1vw, 8px) + clamp(36px, 4.5vw, 44px) * 2);
+            border-radius: 0;
+            margin: 0;
             overflow: hidden;
-            box-shadow: 0 clamp(10px, 2.5vw, 20px) clamp(30px, 7.5vw, 60px) rgba(0, 0, 0, 0.3);
+            box-shadow: none;
             flex-direction: row;
             position: relative;
         }
@@ -243,32 +239,25 @@
         @media (max-width: 768px) {
             .app-container {
                 flex-direction: column;
-                border-radius: 0;
+                height: 100vh;
+                height: 100dvh;
                 margin: 0;
-                margin-top: calc(clamp(36px, 4.5vw, 44px) * 2);
-                height: calc(100vh - (clamp(36px, 4.5vw, 44px) * 2));
-                height: calc(100dvh - (clamp(36px, 4.5vw, 44px) * 2));
-                max-height: calc(100vh - (clamp(36px, 4.5vw, 44px) * 2));
-                max-height: calc(100dvh - (clamp(36px, 4.5vw, 44px) * 2));
             }
         }
 
         /* Landscape mobile */
         @media (max-width: 768px) and (orientation: landscape) {
             .app-container {
-                margin-top: calc(clamp(32px, 4vw, 40px) * 2);
-                height: calc(100vh - (clamp(32px, 4vw, 40px) * 2));
-                height: calc(100dvh - (clamp(32px, 4vw, 40px) * 2));
-                max-height: calc(100vh - (clamp(32px, 4vw, 40px) * 2));
-                max-height: calc(100dvh - (clamp(32px, 4vw, 40px) * 2));
+                height: 100vh;
+                height: 100dvh;
+                margin: 0;
             }
         }
 
         /* Tablet adjustments */
         @media (min-width: 769px) and (max-width: 1024px) {
             .app-container {
-                margin: clamp(4px, 0.75vw, 6px);
-                margin-top: calc(clamp(4px, 0.75vw, 6px) + clamp(36px, 4.5vw, 44px) * 2);
+                margin: 0;
             }
         }
 
@@ -1364,8 +1353,8 @@
         /* Large screen optimizations */
         @media (min-width: 1920px) {
             .app-container {
-                max-width: 1920px;
-                margin: 0 auto;
+                max-width: none;
+                margin: 0;
             }
         }
 
@@ -1639,13 +1628,12 @@
             <!-- Left Sidebar -->
             <div class="sidebar">
 
-                <!-- Resizable Panels Container -->
-                <div class="resizable-panel" id="layersPanel">
+                <!-- Wrapper for Layers Panel full height -->
+                <div class="resizable-panel" id="layersPanel" style="height: 100%; flex: 1;">
                     <!-- Layers Panel -->
-                    <div class="panel-header" draggable="true">
+                    <div class="panel-header">
                         <span>📐 Layers</span>
                         <span id="layerCount">0</span>
-                        <div class="drag-handle">⋮⋮</div>
                     </div>
                     <div class="resizable-panel-content">
                         <!-- Create New Polygon Button -->
@@ -1664,20 +1652,6 @@
                         <div id="layersList"></div>
                     </div>
                 </div>
-
-                <!-- Divider -->
-                <div class="panel-divider" id="divider1"></div>
-
-                <!-- Resizable Color Picker Panel -->
-                <div class="resizable-panel" id="colorPanel">
-                    <div class="panel-header" draggable="true">
-                        <span>🎨 Style</span>
-                        <div class="drag-handle">⋮⋮</div>
-                    </div>
-                    <div class="resizable-panel-content">
-                        <div class="color-picker" id="colorPicker"></div>
-                    </div>
-                </div>
             </div>
 
             <!-- Canvas Container -->
@@ -1687,6 +1661,14 @@
                 <!-- Toolbar -->
                 <div class="toolbar">
                     <button class="tool-btn active" data-tool="select" data-tooltip="Select/Move (S)">✋</button>
+
+                    <!-- Color Picker Button -->
+                    <div style="position: relative; display: inline-flex;">
+                        <button class="tool-btn" id="toolbarColorBtn" data-tooltip="Change Color">🎨</button>
+                        <input type="color" id="toolbarColorInput" value="#667eea"
+                            style="position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none;">
+                    </div>
+
                     <button class="tool-btn combine-btn" data-tool="combine"
                         data-tooltip="Combine Polygons">Combine</button>
                     <button class="tool-btn combine-btn" id="cancelCombineBtn"
@@ -2546,28 +2528,43 @@
             }
 
             setupColorPicker() {
-                const picker = document.getElementById('colorPicker');
-                this.colors.forEach(color => {
-                    const option = document.createElement('div');
-                    option.className = 'color-option';
-                    option.style.background = color;
-                    if (color === this.currentColor) option.classList.add('selected');
+                const colorBtn = document.getElementById('toolbarColorBtn');
+                const colorInput = document.getElementById('toolbarColorInput');
 
-                    option.addEventListener('click', () => {
-                        document.querySelectorAll('.color-option').forEach(o => o.classList.remove('selected'));
-                        option.classList.add('selected');
+                if (colorBtn && colorInput) {
+                    // Sync button color with current selection
+                    const updateButtonColor = (color) => {
+                        colorBtn.style.color = color;
+                        // Optional: Add a small indicator or border
+                        colorBtn.style.borderBottom = `3px solid ${color}`;
+                    };
+
+                    updateButtonColor(this.currentColor);
+
+                    // When button is clicked, trigger the hidden color input
+                    colorBtn.addEventListener('click', () => {
+                        colorInput.click();
+                    });
+
+                    // Handle color change
+                    colorInput.addEventListener('input', (e) => {
+                        const color = e.target.value;
                         this.currentColor = color;
+                        updateButtonColor(color);
 
                         if (this.selectedPolygon) {
                             this.selectedPolygon.color = color;
-                            this.saveHistory(); // Moved here to ensure capture
+                            this.saveHistory();
                             this.render();
-                            this.updateLayers();
+                            this.updateLayers(); // To update the color indicator in layers
                         }
                     });
 
-                    picker.appendChild(option);
-                });
+                    // Also handle direct confirmation (change event)
+                    colorInput.addEventListener('change', (e) => {
+                        this.saveHistory(); // Ensure history is saved on final selection
+                    });
+                }
             }
 
             setupShapeMenu() {
@@ -3049,70 +3046,8 @@
                 this.updateSplitPrompt("Step 1: Click on the polygon you want to split.");
                 this.selectedVertex = null;
 
-                // Add Line Type controls if not present
-                if (!document.getElementById('splitControls')) {
-                    const controls = document.createElement('div');
-                    controls.id = 'splitControls';
-                    controls.style.cssText = `
-                        position: absolute;
-                        top: 70px;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        background: white;
-                        padding: 8px 12px;
-                        border-radius: 20px;
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-                        display: flex;
-                        gap: 8px;
-                        z-index: 1000;
-                        animation: slideDown 0.3s ease-out;
-                    `;
-
-                    const types = [
-                        { id: 'free', label: 'Free' },
-                        { id: 'horizontal', label: 'Horizontal' },
-                        { id: 'vertical', label: 'Vertical' },
-                        { id: 'diagonal', label: 'Diagonal' }
-                    ];
-
-                    types.forEach(t => {
-                        const btn = document.createElement('button');
-                        btn.textContent = t.label;
-                        btn.dataset.type = t.id;
-                        btn.style.cssText = `
-                            border: none;
-                            background: ${t.id === 'free' ? '#e2e8f0' : 'transparent'};
-                            padding: 4px 12px;
-                            border-radius: 12px;
-                            font-size: 12px;
-                            font-weight: 600;
-                            cursor: pointer;
-                            color: #4a5568;
-                            transition: all 0.2s;
-                        `;
-
-                        btn.onclick = () => {
-                            this.splitLineType = t.id;
-                            controls.querySelectorAll('button').forEach(b => {
-                                b.style.background = 'transparent';
-                                b.style.color = '#4a5568';
-                            });
-                            btn.style.background = '#e2e8f0';
-                            btn.style.color = '#2d3748';
-
-                            if (this.splitLineStart && this.splitLineEnd) {
-                                this.updateSplitLineConstraint(this.splitLineEnd);
-                                this.render();
-                            }
-                        };
-
-                        controls.appendChild(btn);
-                    });
-
-                    document.querySelector('.app-container').appendChild(controls);
-                } else {
-                    document.getElementById('splitControls').style.display = 'flex';
-                }
+                // Removed visual controls (Free, Horizontal, etc) as per user request
+                // Defaulting to free split which is already set by this.splitLineType = 'free';
 
                 this.render();
             }
@@ -3138,8 +3073,7 @@
                 const cancelBtn = document.getElementById('cancelSplitBtn');
                 if (cancelBtn) cancelBtn.style.display = 'none';
 
-                const controls = document.getElementById('splitControls');
-                if (controls) controls.style.display = 'none';
+                // No longer handling splitControls as they are not created
 
                 const prompt = document.getElementById('splitPrompt');
                 if (prompt) prompt.remove();
@@ -3154,17 +3088,20 @@
                     prompt.id = 'splitPrompt';
                     prompt.style.cssText = `
                         position: absolute;
-                        top: 120px;
+                        top: 80px;
                         left: 50%;
                         transform: translateX(-50%);
-                        background: rgba(0,0,0,0.8);
+                        background: var(--color-primary-dark, #764ba2);
                         color: white;
                         padding: 8px 16px;
                         border-radius: 20px;
-                        font-size: 13px;
+                        font-size: 14px;
+                        font-weight: 600;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
                         z-index: 1000;
                         pointer-events: none;
                         white-space: nowrap;
+                        animation: fadeIn 0.3s ease-out;
                     `;
                     document.querySelector('.canvas-container').appendChild(prompt);
                 }
@@ -3902,8 +3839,12 @@
                 <div class="layer-color" style="background: ${poly.color}"></div>
                 <div class="layer-name">${poly.name}</div>
                 <div class="layer-actions">
-                    <button class="layer-action-btn" onclick="app.togglePolygonVisibility(${index})">👁️</button>
-                    <button class="layer-action-btn" onclick="app.deletePolygon(${index})">🗑️</button>
+                    <button class="layer-action-btn" onclick="app.togglePolygonVisibility(${index})" title="${poly.visible ? 'Hide' : 'Show'}">
+                        ${poly.visible
+                            ? '👁️'
+                            : '<div style="position:relative; display:inline-block;">👁️<div style="position:absolute; top:50%; left:-2px; right:-2px; height:2px; background:red; transform:rotate(-45deg); pointer-events:none;"></div></div>'}
+                    </button>
+                    <button class="layer-action-btn" onclick="app.deletePolygon(${index})" title="Delete">🗑️</button>
                 </div>
             `;
 
