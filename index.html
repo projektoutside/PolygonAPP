@@ -2256,6 +2256,8 @@
                 this.isDragging = false;
                 this.isPanning = false;
                 this.dragStart = null;
+                this.potentialDragStart = null; // Store initial click for drag threshold detection
+                this.dragThreshold = 3; // Pixels to move before starting drag
                 this.panStartPos = null; // Track initial click position for pan detection
                 this.panThreshold = 5; // Minimum pixels to move before starting pan
                 this.history = [];
@@ -2308,6 +2310,17 @@
                 this.pinchZoom = 1;
                 this.touchStartTime = null;
                 this.lastTouchTime = 0; // Track last touch to prevent mouse event conflicts
+                this.touchStartPos = null; // Store initial touch position for tap detection
+                this.touchTapThreshold = 10; // Pixels to move before considering it a drag
+                this.lastDimensions = null; // Track dimensions for resize compensation
+                this.isResizingCanvas = false; // Flag to track intentional resize operations
+
+                // Grid optimization state
+                this.gridCache = null;
+                this.lastGridState = null; // Track grid state to avoid unnecessary redraws
+                this.renderScheduled = false; // Throttle render calls
+                this.lastRenderTime = 0;
+                this.renderThrottleMs = 16; // ~60fps max render rate
 
                 this.init();
             }
@@ -2470,15 +2483,27 @@
                     const togglePanel = () => {
                         panel.classList.toggle('collapsed');
                         panel.classList.toggle('expanded');
-                        // Trigger resize to adjust canvas
-                        setTimeout(() => this.resizeCanvas(), 310);
+
+                        // Animate resize during transition to prevent stretching/squashing
+                        const startTime = Date.now();
+                        const duration = 350; // Slightly longer than CSS to ensure we catch the end
+
+                        const animateResize = () => {
+                            this.resizeCanvas();
+
+                            if (Date.now() - startTime < duration) {
+                                requestAnimationFrame(animateResize);
+                            }
+                        };
+
+                        requestAnimationFrame(animateResize);
                     };
 
                     // Handle header click first - but ignore clicks on the button
                     header.addEventListener('click', (e) => {
                         // Check if the click originated from the button or its children
-                        const clickedButton = e.target.closest('.bottom-panel-toggle') || 
-                                            e.target.closest('#bottomPanelToggle');
+                        const clickedButton = e.target.closest('.bottom-panel-toggle') ||
+                            e.target.closest('#bottomPanelToggle');
                         if (clickedButton || e.target === toggleButton) {
                             return; // Let button handler deal with it
                         }
@@ -2517,29 +2542,61 @@
                 window.addEventListener('resize', () => this.resizeCanvas());
             }
 
+            syncResize(compensatePan = false) {
+                const rect = this.container.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+
+                // First run initialization or check if update is needed
+                if (!this.lastDimensions) {
+                    this.lastDimensions = { width: rect.width, height: rect.height };
+
+                    // Initialize canvas size
+                    this.canvas.width = rect.width * dpr;
+                    this.canvas.height = rect.height * dpr;
+                    this.ctx.scale(dpr, dpr);
+                    this.canvas.style.width = rect.width + 'px';
+                    this.canvas.style.height = rect.height + 'px';
+                    return true;
+                }
+
+                const oldCssHeight = this.lastDimensions.height;
+                const newCssHeight = rect.height;
+                const oldCssWidth = this.lastDimensions.width;
+                const newCssWidth = rect.width;
+
+                // Check if resize is needed (with small threshold for floating point jitter)
+                if (Math.abs(oldCssHeight - newCssHeight) < 0.5 && Math.abs(oldCssWidth - newCssWidth) < 0.5) {
+                    return false;
+                }
+
+                // Update canvas size
+                this.canvas.width = rect.width * dpr;
+                this.canvas.height = rect.height * dpr;
+
+                // Scale context to match device pixel ratio
+                this.ctx.scale(dpr, dpr);
+
+                // Set CSS size to maintain aspect ratio
+                this.canvas.style.width = rect.width + 'px';
+                this.canvas.style.height = rect.height + 'px';
+
+                // Adjust pan to maintain the visual position relative to Top Center.
+                // ONLY apply compensation during intentional resize operations (panel toggle, window resize)
+                // This prevents random pan drift when DOM updates cause micro layout shifts
+                if (compensatePan && Math.abs(oldCssHeight - newCssHeight) > 1) {
+                    this.pan.y = this.pan.y + (oldCssHeight - newCssHeight) / 2;
+                }
+
+                // Store new dimensions
+                this.lastDimensions = { width: rect.width, height: rect.height };
+                return true;
+            }
+
             resizeCanvas() {
                 // Use requestAnimationFrame for smooth resizing
                 requestAnimationFrame(() => {
-                    const rect = this.container.getBoundingClientRect();
-                    const dpr = window.devicePixelRatio || 1;
-
-                    // Set canvas size accounting for device pixel ratio
-                    this.canvas.width = rect.width * dpr;
-                    this.canvas.height = rect.height * dpr;
-
-                    // Scale context to match device pixel ratio
-                    this.ctx.scale(dpr, dpr);
-
-                    // Set CSS size to maintain aspect ratio
-                    this.canvas.style.width = rect.width + 'px';
-                    this.canvas.style.height = rect.height + 'px';
-
-                    // If there's a sample triangle, re-center the view on it
-                    if (this.polygons.length > 0 && this.polygons[0].name === 'Triangle 1') {
-                        const triangleCenter = this.getPolygonCenter(this.polygons[0]);
-                        this.centerViewOn(triangleCenter.x, triangleCenter.y);
-                    }
-
+                    // This is an intentional resize, so compensate pan
+                    this.syncResize(true);
                     this.render();
                 });
             }
@@ -2585,7 +2642,7 @@
                             this.visualizers.add(viz);
                             item.classList.add('active');
                         }
-                        this.render();
+                        this.render(true); // Force render when toggling visualizers
                     });
                 });
             }
@@ -3047,7 +3104,7 @@
                 const rect = this.canvas.getBoundingClientRect();
                 const cssWidth = rect.width;
                 const cssHeight = rect.height;
-                
+
                 // Calculate pan needed to center the world point at viewport center
                 this.pan.x = -worldX * this.zoom;
                 this.pan.y = -worldY * this.zoom;
@@ -3057,7 +3114,7 @@
                 // Reset pan and zoom to ensure consistent initial state
                 this.pan = { x: 0, y: 0 };
                 this.zoom = 1;
-                
+
                 // Create a triangle at world origin (0,0) snapped to grid
                 const centerX = 0;
                 const centerY = 0;
@@ -3431,10 +3488,17 @@
             }
 
             snapToGrid(point) {
-                if (!this.gridSnap) return point;
+                if (!this.gridSnap || !point) return point;
+                
+                // Use epsilon for floating point precision to avoid rounding errors
+                const epsilon = 1e-10;
+                const snappedX = Math.round((point.x + epsilon) / this.gridSize) * this.gridSize;
+                const snappedY = Math.round((point.y + epsilon) / this.gridSize) * this.gridSize;
+                
+                // Round to avoid floating point artifacts
                 return {
-                    x: Math.round(point.x / this.gridSize) * this.gridSize,
-                    y: Math.round(point.y / this.gridSize) * this.gridSize
+                    x: Math.round(snappedX * 1000) / 1000,
+                    y: Math.round(snappedY * 1000) / 1000
                 };
             }
 
@@ -3579,6 +3643,34 @@
                 return false; // Clicked on empty space
             }
 
+            // Find polygon and vertex at a point (returns object with polygon and vertex or null)
+            findPolygonAtPoint(pos) {
+                // Check for vertex selection first (higher priority)
+                for (let i = this.polygons.length - 1; i >= 0; i--) {
+                    const poly = this.polygons[i];
+                    if (!poly.visible) continue;
+                    for (let j = 0; j < poly.vertices.length; j++) {
+                        const vertex = poly.vertices[j];
+                        const distance = this.distance(pos, vertex);
+                        const threshold = Math.max(8, 20 / this.zoom);
+                        if (distance < threshold) {
+                            return { polygon: poly, vertex: vertex }; // Clicked on a vertex
+                        }
+                    }
+                }
+
+                // Check for polygon selection
+                for (let i = this.polygons.length - 1; i >= 0; i--) {
+                    const poly = this.polygons[i];
+                    if (!poly.visible) continue;
+                    if (poly.containsPoint(pos)) {
+                        return { polygon: poly, vertex: null }; // Clicked on a polygon
+                    }
+                }
+
+                return null; // Clicked on empty space
+            }
+
             handleMouseMove(e) {
                 const rect = this.canvas.getBoundingClientRect();
                 const x = e.clientX - rect.left;
@@ -3586,32 +3678,34 @@
                 const worldPos = this.screenToWorld(x, y);
                 const snappedPos = this.snapToGrid(worldPos);
 
-                // Update coordinate display
-                document.getElementById('coordDisplay').textContent =
-                    `X: ${Math.round(snappedPos.x)}, Y: ${Math.round(snappedPos.y)}`;
+                // Update coordinate display (throttled for performance)
+                const coordDisplay = document.getElementById('coordDisplay');
+                if (coordDisplay) {
+                    coordDisplay.textContent = `X: ${Math.round(snappedPos.x)}, Y: ${Math.round(snappedPos.y)}`;
+                }
 
                 // Handle Split Line Dragging
                 if (this.splitMode && this.isDragging && this.splitStep === 1) {
                     if (this.splitLineStart) {
                         this.updateSplitLineConstraint(snappedPos);
-                        this.render();
+                        this.render(true); // Force render during drag
                     }
                     return;
                 }
 
-                // Handle panning (active pan or potential pan from empty space click)
+                // Handle active panning (with early return)
                 if (this.isPanning && this.dragStart) {
                     this.pan.x += x - this.dragStart.x;
                     this.pan.y += y - this.dragStart.y;
                     this.dragStart = { x, y };
                     this.canvas.style.cursor = 'grabbing';
-                    this.render();
+                    this.render(true); // Force render during pan
                     return;
                 }
 
                 // Check if we should start panning from empty space click
                 if (this.panStartPos && this.dragStart && !this.isDragging && !this.isPanning &&
-                    this.currentTool === 'select') {
+                    this.currentTool === 'select' && !this.selectedPolygon) {
                     const moveDistance = Math.sqrt(
                         Math.pow(x - this.panStartPos.x, 2) +
                         Math.pow(y - this.panStartPos.y, 2)
@@ -3621,46 +3715,35 @@
                     if (moveDistance > this.panThreshold) {
                         this.isPanning = true;
                         this.canvas.style.cursor = 'grabbing';
-                        // Deselect any selected polygon when starting to pan
-                        if (this.selectedPolygon) {
-                            this.selectedPolygon = null;
-                            this.selectedVertex = null;
-                            this.updateProperties();
-                            this.updateLayers();
-                        }
                     }
                 }
 
-                // Continue panning if we've started
-                if (this.isPanning && this.dragStart) {
-                    this.pan.x += x - this.dragStart.x;
-                    this.pan.y += y - this.dragStart.y;
-                    this.dragStart = { x, y };
-                    this.render();
-                    return;
+                // Check if we should start dragging a selected polygon/vertex
+                if (this.potentialDragStart && this.selectedPolygon && !this.isDragging && !this.isPanning) {
+                    const worldMoveDistance = this.distance(snappedPos, this.potentialDragStart);
+
+                    // Only start dragging after moving beyond threshold (in world units)
+                    if (worldMoveDistance > this.dragThreshold) {
+                        this.isDragging = true;
+                        // Update dragStart to current position to prevent initial jump
+                        this.dragStart = snappedPos;
+                    }
                 }
+
 
                 if (this.isDragging && this.selectedVertex) {
-                    // Update the vertex position
+                    // Update the vertex position directly
                     this.selectedVertex.x = snappedPos.x;
                     this.selectedVertex.y = snappedPos.y;
-
-                    // Force reference breaking for this vertex array to be absolutely safe
-                    if (this.selectedPolygon) {
-                        this.selectedPolygon.vertices = this.selectedPolygon.vertices.map(v =>
-                            v === this.selectedVertex ? this.selectedVertex : { x: v.x, y: v.y }
-                        );
-                    }
-
                     this.updateProperties();
-                    this.render();
+                    this.render(true); // Force render during drag for responsiveness
                 } else if (this.isDragging && this.selectedPolygon && !this.selectedVertex) {
                     const dx = snappedPos.x - this.dragStart.x;
                     const dy = snappedPos.y - this.dragStart.y;
                     this.selectedPolygon.move(dx, dy);
                     this.dragStart = snappedPos;
                     this.updateProperties();
-                    this.render();
+                    this.render(true); // Force render during drag for responsiveness
                 }
             }
 
@@ -3706,6 +3789,7 @@
                 this.isPanning = false;
                 this.dragStart = null;
                 this.panStartPos = null;
+                this.potentialDragStart = null;
             }
 
             handleWheel(e) {
@@ -3724,7 +3808,7 @@
                 this.pan.x += (worldAfter.x - worldBefore.x) * this.zoom;
                 this.pan.y += (worldAfter.y - worldBefore.y) * this.zoom;
 
-                this.render();
+                this.render(true); // Force render during zoom for smooth experience
             }
 
             handleDoubleClick(e) {
@@ -3764,9 +3848,10 @@
                 const worldPos = this.screenToWorld(x, y);
                 const snappedPos = this.snapToGrid(worldPos);
 
-                // Store initial touch position
+                // Store initial touch position for tap detection
                 this.panStartPos = { x, y };
                 this.touchStartTime = Date.now();
+                this.touchStartPos = { x, y }; // Store for movement detection
 
                 // Handle Split Mode Interaction
                 if (this.splitMode) {
@@ -3817,20 +3902,33 @@
                     return;
                 }
 
-                // Check if touch is on a polygon
-                const clickedOnPolygon = this.isPointOnPolygon(snappedPos);
+                // For select tool, immediately check if we hit a polygon
+                if (this.currentTool === 'select') {
+                    // Check if touch is directly on a polygon or vertex
+                    const polygonHit = this.findPolygonAtPoint(snappedPos);
 
-                // If touching outside polygons and using select tool, enable pan mode
-                if (!clickedOnPolygon && this.currentTool === 'select') {
-                    this.dragStart = { x, y };
-                    this.canvas.style.cursor = 'grab';
-                    return;
-                }
-
-                // Handle polygon selection directly for touch
-                if (this.currentTool === 'select' && clickedOnPolygon) {
-                    this.handleSelect(snappedPos);
-                    return;
+                    if (polygonHit) {
+                        // Immediately select the polygon for instant feedback
+                        this.selectedPolygon = polygonHit.polygon;
+                        if (polygonHit.vertex) {
+                            this.selectedVertex = polygonHit.vertex;
+                            this.isDragging = true;
+                            this.dragStart = snappedPos;
+                        } else {
+                            this.selectedVertex = null;
+                            // Prepare for potential drag, but don't start yet
+                            this.dragStart = snappedPos;
+                        }
+                        this.updateProperties();
+                        this.updateLayers();
+                        this.render();
+                        return;
+                    } else {
+                        // Touching empty space - prepare for panning, but allow quick tap to deselect
+                        this.dragStart = { x, y };
+                        this.canvas.style.cursor = 'grab';
+                        // Don't deselect immediately - wait for touch end to see if it's a tap
+                    }
                 }
             }
 
@@ -3849,7 +3947,7 @@
 
                     const scale = distance / this.pinchDistance;
                     this.zoom = Math.max(0.1, Math.min(5, this.pinchZoom * scale));
-                    this.render();
+                    this.render(true); // Force render during pinch zoom for smooth experience
                     return;
                 }
 
@@ -3867,34 +3965,37 @@
                 document.getElementById('coordDisplay').textContent =
                     `X: ${Math.round(snappedPos.x)}, Y: ${Math.round(snappedPos.y)}`;
 
+                // Calculate movement distance from touch start
+                let moveDistance = 0;
+                if (this.touchStartPos) {
+                    moveDistance = Math.sqrt(
+                        Math.pow(x - this.touchStartPos.x, 2) +
+                        Math.pow(y - this.touchStartPos.y, 2)
+                    );
+                }
+
                 // Handle Split Line Dragging
                 if (this.splitMode && this.isDragging && this.splitStep === 1) {
                     if (this.splitLineStart) {
                         this.updateSplitLineConstraint(snappedPos);
-                        this.render();
+                        this.render(true); // Force render during drag
                     }
                     return;
                 }
 
+                // If we have a selected polygon, check if we're dragging it
+                if (this.selectedPolygon && !this.isDragging && moveDistance > this.touchTapThreshold) {
+                    // Start dragging if we moved enough
+                    this.isDragging = true;
+                }
+
                 // Check if we should start panning from empty space touch
                 if (this.panStartPos && this.dragStart && !this.isDragging && !this.isPanning &&
-                    this.currentTool === 'select') {
-                    const moveDistance = Math.sqrt(
-                        Math.pow(x - this.panStartPos.x, 2) +
-                        Math.pow(y - this.panStartPos.y, 2)
-                    );
-
+                    this.currentTool === 'select' && !this.selectedPolygon) {
                     // Lower threshold for touch (more sensitive)
                     if (moveDistance > this.panThreshold * 0.7) {
                         this.isPanning = true;
                         this.canvas.style.cursor = 'grabbing';
-                        // Deselect any selected polygon when starting to pan
-                        if (this.selectedPolygon && !this.selectedVertex) {
-                            this.selectedPolygon = null;
-                            this.selectedVertex = null;
-                            this.updateProperties();
-                            this.updateLayers();
-                        }
                     }
                 }
 
@@ -3903,7 +4004,7 @@
                     this.pan.x += x - this.dragStart.x;
                     this.pan.y += y - this.dragStart.y;
                     this.dragStart = { x, y };
-                    this.render();
+                    this.render(true); // Force render during pan
                     return;
                 }
 
@@ -3913,14 +4014,14 @@
                         // Drag vertex
                         this.selectedVertex.x = snappedPos.x;
                         this.selectedVertex.y = snappedPos.y;
-                        this.render();
+                        this.render(true); // Force render during drag
                     } else if (this.selectedPolygon && this.dragStart) {
                         // Drag polygon
                         const dx = snappedPos.x - this.dragStart.x;
                         const dy = snappedPos.y - this.dragStart.y;
                         this.selectedPolygon.move(dx, dy);
                         this.dragStart = snappedPos;
-                        this.render();
+                        this.render(true); // Force render during drag
                     }
                 }
             }
@@ -3945,40 +4046,46 @@
                     this.saveHistory();
                 }
 
-                // If we tapped (didn't pan or drag), handle tap
-                if (this.panStartPos && !this.isPanning && !this.isDragging && this.currentTool === 'select') {
+                // If we tapped (didn't pan or drag), handle tap for deselection
+                if (this.touchStartPos && !this.isPanning && !this.isDragging && this.currentTool === 'select') {
                     const touch = e.changedTouches[0];
                     if (touch) {
                         const rect = this.canvas.getBoundingClientRect();
                         const x = touch.clientX - rect.left;
                         const y = touch.clientY - rect.top;
                         const moveDistance = Math.sqrt(
-                            Math.pow(x - this.panStartPos.x, 2) +
-                            Math.pow(y - this.panStartPos.y, 2)
+                            Math.pow(x - this.touchStartPos.x, 2) +
+                            Math.pow(y - this.touchStartPos.y, 2)
                         );
 
                         // If we didn't move much, treat as a tap
-                        if (moveDistance <= this.panThreshold * 0.7) {
+                        if (moveDistance <= this.touchTapThreshold) {
                             const worldPos = this.screenToWorld(x, y);
                             const snappedPos = this.snapToGrid(worldPos);
 
-                            // Only deselect if tapping on empty space
-                            if (!this.isPointOnPolygon(snappedPos)) {
+                            // Check if tapping on empty space - if so, deselect and show grid clearly
+                            const polygonHit = this.findPolygonAtPoint(snappedPos);
+                            if (!polygonHit) {
+                                // Tapped empty space - deselect everything and show grid
                                 this.selectedPolygon = null;
                                 this.selectedVertex = null;
                                 this.updateProperties();
                                 this.updateLayers();
                                 this.render();
+                                // Grid will automatically be visible since nothing is selected
                             }
                         }
                     }
                 }
 
                 // Reset drag state
-                this.isDragging = false;
+                if (!this.isDragging || !this.selectedPolygon) {
+                    this.isDragging = false;
+                }
                 this.dragStart = null;
                 this.panStartPos = null;
                 this.touchStartTime = null;
+                this.touchStartPos = null;
             }
 
             handleKeyDown(e) {
@@ -4048,6 +4155,7 @@
                 // Iterate backwards to select from top-most polygons first
                 for (let i = this.polygons.length - 1; i >= 0; i--) {
                     const poly = this.polygons[i];
+                    if (!poly.visible) continue; // Skip invisible polygons
                     for (let j = 0; j < poly.vertices.length; j++) {
                         const vertex = poly.vertices[j];
                         const distance = this.distance(pos, vertex);
@@ -4059,7 +4167,8 @@
                         if (distance < threshold) {
                             this.selectedPolygon = poly;
                             this.selectedVertex = vertex;
-                            this.isDragging = true;
+                            // Don't set isDragging=true yet - wait for actual mouse movement
+                            this.potentialDragStart = pos;
                             this.dragStart = pos;
                             this.updateProperties();
                             this.updateLayers();
@@ -4073,9 +4182,11 @@
                 // Iterate backwards to select top-most polygon first
                 for (let i = this.polygons.length - 1; i >= 0; i--) {
                     const poly = this.polygons[i];
+                    if (!poly.visible) continue; // Skip invisible polygons
                     if (poly.containsPoint(pos)) {
                         this.selectedPolygon = poly;
-                        this.isDragging = true;
+                        // Don't set isDragging=true yet - wait for actual mouse movement
+                        this.potentialDragStart = pos;
                         this.dragStart = pos;
                         this.updateProperties();
                         this.updateLayers();
@@ -4260,7 +4371,27 @@
             }
 
             // Rendering
-            render() {
+            render(force = false) {
+                // Throttle render calls for better performance
+                const now = performance.now();
+                if (!force && this.renderScheduled) {
+                    return;
+                }
+                
+                if (!force && (now - this.lastRenderTime) < this.renderThrottleMs) {
+                    if (!this.renderScheduled) {
+                        this.renderScheduled = true;
+                        requestAnimationFrame(() => {
+                            this.renderScheduled = false;
+                            this.render(true);
+                        });
+                    }
+                    return;
+                }
+
+                this.lastRenderTime = now;
+                this.renderScheduled = false;
+
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
                 // Save context state
@@ -4329,13 +4460,20 @@
             }
 
             drawGrid() {
-                this.ctx.strokeStyle = '#e0e0e0';
-                this.ctx.lineWidth = 1 / this.zoom;
+                // Safety check: ensure gridSize is valid
+                if (!this.gridSize || this.gridSize <= 0 || !isFinite(this.gridSize)) {
+                    return;
+                }
 
                 // Get CSS dimensions for coordinate calculations
                 const rect = this.canvas.getBoundingClientRect();
                 const cssWidth = rect.width;
                 const cssHeight = rect.height;
+
+                // Safety check: ensure dimensions are valid
+                if (!cssWidth || !cssHeight || !isFinite(cssWidth) || !isFinite(cssHeight)) {
+                    return;
+                }
 
                 const viewBounds = {
                     left: -cssWidth / (2 * this.zoom) - this.pan.x / this.zoom,
@@ -4344,43 +4482,106 @@
                     bottom: cssHeight / (2 * this.zoom) - this.pan.y / this.zoom
                 };
 
-                // Draw vertical lines
-                const startX = Math.floor(viewBounds.left / this.gridSize) * this.gridSize;
-                const endX = Math.ceil(viewBounds.right / this.gridSize) * this.gridSize;
-
-                for (let x = startX; x <= endX; x += this.gridSize) {
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(x, viewBounds.top);
-                    this.ctx.lineTo(x, viewBounds.bottom);
-                    this.ctx.stroke();
+                // Calculate effective grid size in screen pixels for adaptive rendering
+                const gridSizeScreen = this.gridSize * this.zoom;
+                
+                // Adaptive grid density: skip drawing if grid is too dense or too sparse
+                // Skip if grid lines are less than 2 pixels apart (too dense)
+                if (gridSizeScreen < 2) {
+                    // Draw major grid lines only (every 5th or 10th line)
+                    const majorGridMultiplier = gridSizeScreen < 0.5 ? 20 : 10;
+                    this.drawGridLines(viewBounds, this.gridSize * majorGridMultiplier, true);
+                    return;
+                }
+                
+                // Skip if grid lines are more than 200 pixels apart (too sparse)
+                if (gridSizeScreen > 200) {
+                    // Draw sub-grid lines for better visibility
+                    const subGridSize = this.gridSize / 5;
+                    this.drawGridLines(viewBounds, subGridSize, false);
+                    this.drawGridLines(viewBounds, this.gridSize, true);
+                    return;
                 }
 
-                // Draw horizontal lines
-                const startY = Math.floor(viewBounds.top / this.gridSize) * this.gridSize;
-                const endY = Math.ceil(viewBounds.bottom / this.gridSize) * this.gridSize;
+                // Normal grid rendering - optimized batch drawing
+                this.drawGridLines(viewBounds, this.gridSize, false);
+            }
 
-                for (let y = startY; y <= endY; y += this.gridSize) {
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(viewBounds.left, y);
-                    this.ctx.lineTo(viewBounds.right, y);
-                    this.ctx.stroke();
+            drawGridLines(viewBounds, gridSize, isMajor = false) {
+                // Safety check: ensure gridSize is valid
+                if (!gridSize || gridSize <= 0 || !isFinite(gridSize)) {
+                    return;
                 }
 
-                // Draw axes
-                this.ctx.strokeStyle = '#999';
-                this.ctx.lineWidth = 2 / this.zoom;
+                // Make grid more visible when nothing is selected
+                const gridColor = this.selectedPolygon 
+                    ? (isMajor ? '#d0d0d0' : '#e8e8e8') 
+                    : (isMajor ? '#c0c0c0' : '#d8d8d8');
+                
+                this.ctx.strokeStyle = gridColor;
+                this.ctx.lineWidth = isMajor 
+                    ? (this.selectedPolygon ? (1.2 / this.zoom) : (1.5 / this.zoom))
+                    : (this.selectedPolygon ? (0.8 / this.zoom) : (1 / this.zoom));
 
-                // X-axis
+                // Calculate grid line bounds with proper rounding and safety checks
+                const startX = Math.floor(viewBounds.left / gridSize) * gridSize;
+                const endX = Math.ceil(viewBounds.right / gridSize) * gridSize;
+                const startY = Math.floor(viewBounds.top / gridSize) * gridSize;
+                const endY = Math.ceil(viewBounds.bottom / gridSize) * gridSize;
+
+                // Safety check: ensure bounds are valid
+                if (!isFinite(startX) || !isFinite(endX) || !isFinite(startY) || !isFinite(endY)) {
+                    return;
+                }
+
+                // Limit number of lines to prevent performance issues
+                const maxLines = 500;
+                const numVerticalLines = Math.floor((endX - startX) / gridSize) + 1;
+                const numHorizontalLines = Math.floor((endY - startY) / gridSize) + 1;
+
+                if (numVerticalLines > maxLines || numHorizontalLines > maxLines || 
+                    numVerticalLines < 0 || numHorizontalLines < 0) {
+                    // Too many lines or invalid count - skip drawing to prevent lag
+                    return;
+                }
+
+                // Batch draw vertical lines for better performance
                 this.ctx.beginPath();
-                this.ctx.moveTo(viewBounds.left, 0);
-                this.ctx.lineTo(viewBounds.right, 0);
+                for (let x = startX; x <= endX; x += gridSize) {
+                    // Use epsilon to handle floating point precision
+                    const xPos = Math.round(x * 1000) / 1000;
+                    this.ctx.moveTo(xPos, viewBounds.top);
+                    this.ctx.lineTo(xPos, viewBounds.bottom);
+                }
                 this.ctx.stroke();
 
-                // Y-axis
+                // Batch draw horizontal lines for better performance
                 this.ctx.beginPath();
-                this.ctx.moveTo(0, viewBounds.top);
-                this.ctx.lineTo(0, viewBounds.bottom);
+                for (let y = startY; y <= endY; y += gridSize) {
+                    // Use epsilon to handle floating point precision
+                    const yPos = Math.round(y * 1000) / 1000;
+                    this.ctx.moveTo(viewBounds.left, yPos);
+                    this.ctx.lineTo(viewBounds.right, yPos);
+                }
                 this.ctx.stroke();
+
+                // Draw axes only for major grid
+                if (isMajor && gridSize === this.gridSize) {
+                    this.ctx.strokeStyle = '#999';
+                    this.ctx.lineWidth = 2 / this.zoom;
+
+                    // X-axis
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(viewBounds.left, 0);
+                    this.ctx.lineTo(viewBounds.right, 0);
+                    this.ctx.stroke();
+
+                    // Y-axis
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, viewBounds.top);
+                    this.ctx.lineTo(0, viewBounds.bottom);
+                    this.ctx.stroke();
+                }
             }
 
             drawPolygon(polygon, selected = false) {
@@ -4536,19 +4737,253 @@
                     this.ctx.fill();
                 }
 
-                // Diagonals
+                // Altitudes & Orthocenter (for triangles only)
+                if (this.visualizers.has('altitudes') && poly.vertices.length === 3) {
+                    this.ctx.strokeStyle = '#ef4444'; // Red
+                    this.ctx.lineWidth = 1.5 / this.zoom;
+                    this.ctx.setLineDash([5 / this.zoom, 3 / this.zoom]);
+
+                    const altitudes = [];
+                    const vertices = poly.vertices;
+
+                    // Safety check: ensure we have exactly 3 valid vertices
+                    if (vertices.length !== 3) {
+                        this.ctx.setLineDash([]);
+                        this.ctx.restore();
+                        return;
+                    }
+
+                    // Calculate all three altitudes
+                    for (let i = 0; i < 3; i++) {
+                        const vertex = vertices[i];
+                        const opposite1 = vertices[(i + 1) % 3];
+                        const opposite2 = vertices[(i + 2) % 3];
+
+                        // Safety checks
+                        if (!vertex || !opposite1 || !opposite2) continue;
+                        if (!isFinite(vertex.x) || !isFinite(vertex.y) ||
+                            !isFinite(opposite1.x) || !isFinite(opposite1.y) ||
+                            !isFinite(opposite2.x) || !isFinite(opposite2.y)) continue;
+
+                        // Line from opposite1 to opposite2
+                        const dx = opposite2.x - opposite1.x;
+                        const dy = opposite2.y - opposite1.y;
+                        const lineLength = Math.sqrt(dx * dx + dy * dy);
+
+                        if (lineLength < 1e-10) continue; // Avoid division by zero
+
+                        // Calculate projection of vertex onto the opposite side
+                        const t = ((vertex.x - opposite1.x) * dx + (vertex.y - opposite1.y) * dy) / (lineLength * lineLength);
+                        const foot = {
+                            x: opposite1.x + t * dx,
+                            y: opposite1.y + t * dy
+                        };
+
+                        // Draw altitude line from vertex to foot
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(vertex.x, vertex.y);
+                        this.ctx.lineTo(foot.x, foot.y);
+                        this.ctx.stroke();
+
+                        altitudes.push({ vertex, foot });
+                    }
+
+                    // Calculate orthocenter (intersection of altitudes)
+                    // For triangle with vertices A, B, C:
+                    // Orthocenter is intersection of altitudes from A and B
+                    if (altitudes.length >= 2) {
+                        const alt1 = altitudes[0];
+                        const alt2 = altitudes[1];
+
+                        // Line 1: from alt1.vertex to alt1.foot
+                        const dx1 = alt1.foot.x - alt1.vertex.x;
+                        const dy1 = alt1.foot.y - alt1.vertex.y;
+                        const m1 = dx1 !== 0 ? dy1 / dx1 : Infinity;
+                        const b1 = m1 !== Infinity ? alt1.vertex.y - m1 * alt1.vertex.x : alt1.vertex.x;
+
+                        // Line 2: from alt2.vertex to alt2.foot
+                        const dx2 = alt2.foot.x - alt2.vertex.x;
+                        const dy2 = alt2.foot.y - alt2.vertex.y;
+                        const m2 = dx2 !== 0 ? dy2 / dx2 : Infinity;
+                        const b2 = m2 !== Infinity ? alt2.vertex.y - m2 * alt2.vertex.x : alt2.vertex.x;
+
+                        let orthocenter = null;
+
+                        if (m1 === Infinity && m2 === Infinity) {
+                            // Both vertical - parallel, no intersection
+                            orthocenter = null;
+                        } else if (m1 === Infinity) {
+                            // Line 1 is vertical
+                            const x = b1;
+                            const y = m2 * x + b2;
+                            orthocenter = { x, y };
+                        } else if (m2 === Infinity) {
+                            // Line 2 is vertical
+                            const x = b2;
+                            const y = m1 * x + b1;
+                            orthocenter = { x, y };
+                        } else {
+                            // Both have slopes
+                            const x = (b2 - b1) / (m1 - m2);
+                            const y = m1 * x + b1;
+                            orthocenter = { x, y };
+                        }
+
+                        // Draw orthocenter point
+                        if (orthocenter && isFinite(orthocenter.x) && isFinite(orthocenter.y)) {
+                            this.ctx.setLineDash([]);
+                            this.ctx.fillStyle = '#ef4444';
+                            this.ctx.beginPath();
+                            this.ctx.arc(orthocenter.x, orthocenter.y, 6 / this.zoom, 0, Math.PI * 2);
+                            this.ctx.fill();
+                            this.ctx.strokeStyle = '#ffffff';
+                            this.ctx.lineWidth = 1.5 / this.zoom;
+                            this.ctx.stroke();
+                        }
+                    }
+
+                    this.ctx.setLineDash([]);
+                }
+
+                // Perpendicular Bisectors (for triangles and other polygons)
+                if (this.visualizers.has('bisectors')) {
+                    this.ctx.strokeStyle = '#10b981'; // Green
+                    this.ctx.lineWidth = 1.5 / this.zoom;
+                    this.ctx.setLineDash([5 / this.zoom, 3 / this.zoom]);
+
+                    const vertices = poly.vertices;
+                    const bisectors = [];
+
+                    // Safety check: need at least 3 vertices
+                    if (vertices.length < 3) {
+                        this.ctx.setLineDash([]);
+                        this.ctx.restore();
+                        return;
+                    }
+
+                    // Calculate perpendicular bisector for each side
+                    for (let i = 0; i < vertices.length; i++) {
+                        const v1 = vertices[i];
+                        const v2 = vertices[(i + 1) % vertices.length];
+
+                        // Safety checks
+                        if (!v1 || !v2) continue;
+                        if (!isFinite(v1.x) || !isFinite(v1.y) ||
+                            !isFinite(v2.x) || !isFinite(v2.y)) continue;
+
+                        // Midpoint of the side
+                        const midpoint = {
+                            x: (v1.x + v2.x) / 2,
+                            y: (v1.y + v2.y) / 2
+                        };
+
+                        // Direction vector of the side
+                        const dx = v2.x - v1.x;
+                        const dy = v2.y - v1.y;
+                        const sideLength = Math.sqrt(dx * dx + dy * dy);
+
+                        if (sideLength < 1e-10) continue; // Avoid division by zero
+
+                        // Perpendicular direction (rotate 90 degrees)
+                        const perpDx = -dy;
+                        const perpDy = dx;
+
+                        // Normalize perpendicular vector
+                        const perpLength = Math.sqrt(perpDx * perpDx + perpDy * perpDy);
+                        if (perpLength === 0) continue;
+
+                        const perpNormX = perpDx / perpLength;
+                        const perpNormY = perpDy / perpLength;
+
+                        // Calculate centroid to determine which direction to extend
+                        let cx = 0, cy = 0;
+                        for (let v of vertices) {
+                            cx += v.x;
+                            cy += v.y;
+                        }
+                        cx /= vertices.length;
+                        cy /= vertices.length;
+
+                        // Extend bisector in both directions (long enough to be visible)
+                        const extendLength = Math.max(200, sideLength * 2) / this.zoom;
+                        const startX = midpoint.x - perpNormX * extendLength;
+                        const startY = midpoint.y - perpNormY * extendLength;
+                        const endX = midpoint.x + perpNormX * extendLength;
+                        const endY = midpoint.y + perpNormY * extendLength;
+
+                        // Draw bisector line
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(startX, startY);
+                        this.ctx.lineTo(endX, endY);
+                        this.ctx.stroke();
+
+                        bisectors.push({ midpoint, perpNormX, perpNormY });
+                    }
+
+                    // For triangles, find and draw circumcenter (intersection of perpendicular bisectors)
+                    if (vertices.length === 3 && bisectors.length >= 2) {
+                        const bis1 = bisectors[0];
+                        const bis2 = bisectors[1];
+
+                        // Line 1: through bis1.midpoint with direction bis1.perpNormX, bis1.perpNormY
+                        // Parametric: p = bis1.midpoint + t * (bis1.perpNormX, bis1.perpNormY)
+                        // Convert to ax + by = c form
+                        const a1 = -bis1.perpNormY;
+                        const b1 = bis1.perpNormX;
+                        const c1 = a1 * bis1.midpoint.x + b1 * bis1.midpoint.y;
+
+                        // Line 2: through bis2.midpoint with direction bis2.perpNormX, bis2.perpNormY
+                        const a2 = -bis2.perpNormY;
+                        const b2 = bis2.perpNormX;
+                        const c2 = a2 * bis2.midpoint.x + b2 * bis2.midpoint.y;
+
+                        // Solve system: a1*x + b1*y = c1, a2*x + b2*y = c2
+                        const det = a1 * b2 - a2 * b1;
+
+                        if (Math.abs(det) > 1e-10) {
+                            const circumcenterX = (c1 * b2 - c2 * b1) / det;
+                            const circumcenterY = (a1 * c2 - a2 * c1) / det;
+
+                            if (isFinite(circumcenterX) && isFinite(circumcenterY)) {
+                                // Draw circumcenter
+                                this.ctx.setLineDash([]);
+                                this.ctx.fillStyle = '#10b981';
+                                this.ctx.beginPath();
+                                this.ctx.arc(circumcenterX, circumcenterY, 6 / this.zoom, 0, Math.PI * 2);
+                                this.ctx.fill();
+                                this.ctx.strokeStyle = '#ffffff';
+                                this.ctx.lineWidth = 1.5 / this.zoom;
+                                this.ctx.stroke();
+                            }
+                        }
+                    }
+
+                    this.ctx.setLineDash([]);
+                }
+
+                // Diagonals (for polygons with more than 3 vertices)
                 if (this.visualizers.has('diagonals') && poly.vertices.length > 3) {
-                    this.ctx.strokeStyle = '#a855f7';
+                    this.ctx.strokeStyle = '#a855f7'; // Purple
                     this.ctx.lineWidth = 1 / this.zoom;
                     this.ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
 
-                    for (let i = 0; i < poly.vertices.length; i++) {
-                        for (let j = i + 2; j < poly.vertices.length; j++) {
-                            if (j === poly.vertices.length - 1 && i === 0) continue;
+                    const vertices = poly.vertices;
+                    
+                    // Draw all diagonals: connect vertex i to vertex j where j is at least 2 positions away
+                    // This ensures we don't draw edges (adjacent vertices)
+                    for (let i = 0; i < vertices.length; i++) {
+                        for (let j = i + 2; j < vertices.length; j++) {
+                            // Skip the edge case where last vertex connects to first (that's an edge, not a diagonal)
+                            if (j === vertices.length - 1 && i === 0) continue;
+
+                            // Safety check: ensure vertices are valid
+                            if (!vertices[i] || !vertices[j]) continue;
+                            if (!isFinite(vertices[i].x) || !isFinite(vertices[i].y) ||
+                                !isFinite(vertices[j].x) || !isFinite(vertices[j].y)) continue;
 
                             this.ctx.beginPath();
-                            this.ctx.moveTo(poly.vertices[i].x, poly.vertices[i].y);
-                            this.ctx.lineTo(poly.vertices[j].x, poly.vertices[j].y);
+                            this.ctx.moveTo(vertices[i].x, vertices[i].y);
+                            this.ctx.lineTo(vertices[j].x, vertices[j].y);
                             this.ctx.stroke();
                         }
                     }
@@ -4859,7 +5294,11 @@
             toggleGridSnap() {
                 this.gridSnap = !this.gridSnap;
                 const toggle = document.getElementById('gridSnapToggle');
-                toggle.classList.toggle('active');
+                if (toggle) {
+                    toggle.classList.toggle('active');
+                }
+                // Trigger render to update grid appearance if needed
+                this.render(true);
             }
 
             togglePolygonVisibility(index) {
@@ -4986,12 +5425,12 @@
             toggleFullscreen() {
                 const element = document.documentElement;
                 const fullscreenBtn = document.getElementById('fullscreenToggle');
-                
+
                 // Check if currently in fullscreen
-                const isFullscreen = !!(document.fullscreenElement || 
-                                       document.webkitFullscreenElement || 
-                                       document.mozFullScreenElement || 
-                                       document.msFullscreenElement);
+                const isFullscreen = !!(document.fullscreenElement ||
+                    document.webkitFullscreenElement ||
+                    document.mozFullScreenElement ||
+                    document.msFullscreenElement);
 
                 if (!isFullscreen) {
                     // Enter fullscreen
@@ -5024,10 +5463,10 @@
 
             handleFullscreenChange() {
                 const fullscreenBtn = document.getElementById('fullscreenToggle');
-                const isFullscreen = !!(document.fullscreenElement || 
-                                       document.webkitFullscreenElement || 
-                                       document.mozFullScreenElement || 
-                                       document.msFullscreenElement);
+                const isFullscreen = !!(document.fullscreenElement ||
+                    document.webkitFullscreenElement ||
+                    document.mozFullScreenElement ||
+                    document.msFullscreenElement);
 
                 if (fullscreenBtn) {
                     if (isFullscreen) {
@@ -5482,7 +5921,7 @@
             static getIntersectionInfiniteLine(seg, line) {
                 // Line: p1, p2. Seg: p3, p4
                 const x1 = line.p1.x, y1 = line.p1.y;
-                const x2 = line.p2.x, y2 = line.p2.y;
+                x2 = line.p2.x, y2 = line.p2.y;
                 const x3 = seg.p1.x, y3 = seg.p1.y;
                 const x4 = seg.p2.x, y4 = seg.p2.y;
 
@@ -5928,5 +6367,11 @@
         });
     </script>
 </body>
+
+</html>
+
+</html>
+
+</html>
 
 </html>
