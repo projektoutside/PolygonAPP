@@ -2306,6 +2306,8 @@
                 this.isPinching = false;
                 this.pinchDistance = 0;
                 this.pinchZoom = 1;
+                this.touchStartTime = null;
+                this.lastTouchTime = 0; // Track last touch to prevent mouse event conflicts
 
                 this.init();
             }
@@ -3452,6 +3454,13 @@
 
             // Mouse/Touch handlers
             handleMouseDown(e) {
+                // Prevent mouse events from firing immediately after touch events
+                // This avoids double handling on touch devices
+                const timeSinceLastTouch = Date.now() - this.lastTouchTime;
+                if (timeSinceLastTouch < 500) {
+                    return; // Ignore mouse event if it happened shortly after touch
+                }
+
                 const rect = this.canvas.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
@@ -3724,6 +3733,10 @@
 
             handleTouchStart(e) {
                 e.preventDefault();
+                e.stopPropagation();
+
+                // Update last touch time to prevent mouse event conflicts
+                this.lastTouchTime = Date.now();
 
                 // Handle multi-touch for pan/zoom
                 if (e.touches.length === 2) {
@@ -3735,6 +3748,11 @@
                         touch2.clientY - touch1.clientY
                     );
                     this.pinchZoom = this.zoom;
+                    // Clear any selection when pinching
+                    this.isDragging = false;
+                    this.isPanning = false;
+                    this.selectedPolygon = null;
+                    this.selectedVertex = null;
                     return;
                 }
 
@@ -3748,6 +3766,56 @@
 
                 // Store initial touch position
                 this.panStartPos = { x, y };
+                this.touchStartTime = Date.now();
+
+                // Handle Split Mode Interaction
+                if (this.splitMode) {
+                    if (this.splitStep === 0) {
+                        // Step 0: Select Polygon
+                        for (let i = this.polygons.length - 1; i >= 0; i--) {
+                            const poly = this.polygons[i];
+                            if (poly.visible && poly.containsPoint(snappedPos)) {
+                                this.selectedPolygon = poly;
+                                this.updateProperties();
+                                this.updateLayers();
+                                this.render();
+                                const confirmModal = document.getElementById('splitConfirmSelectionModal');
+                                if (confirmModal) {
+                                    confirmModal.style.display = 'flex';
+                                }
+                                return;
+                            }
+                        }
+                    } else if (this.splitStep === 1) {
+                        // Step 1: Start drawing line
+                        this.isDragging = true;
+                        this.dragStart = { x, y };
+                        this.splitLineStart = snappedPos;
+                        this.splitLineEnd = snappedPos;
+                        const btn = document.querySelector('[data-tool="split"]');
+                        if (btn) btn.style.display = 'flex';
+                    }
+                    return;
+                }
+
+                // Handle Combine Mode Selection
+                if (this.combineMode) {
+                    for (let i = this.polygons.length - 1; i >= 0; i--) {
+                        const poly = this.polygons[i];
+                        if (!poly.visible) continue;
+                        if (poly.containsPoint(snappedPos)) {
+                            if (this.combineSelection.has(poly)) {
+                                this.combineSelection.delete(poly);
+                            } else {
+                                this.combineSelection.add(poly);
+                            }
+                            this.render();
+                            this.updateLayers();
+                            return;
+                        }
+                    }
+                    return;
+                }
 
                 // Check if touch is on a polygon
                 const clickedOnPolygon = this.isPointOnPolygon(snappedPos);
@@ -3759,17 +3827,16 @@
                     return;
                 }
 
-                // Convert to mouse event for other tools
-                const mouseEvent = new MouseEvent('mousedown', {
-                    clientX: touch.clientX,
-                    clientY: touch.clientY,
-                    bubbles: true
-                });
-                this.handleMouseDown(mouseEvent);
+                // Handle polygon selection directly for touch
+                if (this.currentTool === 'select' && clickedOnPolygon) {
+                    this.handleSelect(snappedPos);
+                    return;
+                }
             }
 
             handleTouchMove(e) {
                 e.preventDefault();
+                e.stopPropagation();
 
                 // Handle pinch-to-zoom
                 if (e.touches.length === 2 && this.isPinching) {
@@ -3788,9 +3855,26 @@
 
                 // Single touch move
                 const touch = e.touches[0];
+                if (!touch) return;
+
                 const rect = this.canvas.getBoundingClientRect();
                 const x = touch.clientX - rect.left;
                 const y = touch.clientY - rect.top;
+                const worldPos = this.screenToWorld(x, y);
+                const snappedPos = this.snapToGrid(worldPos);
+
+                // Update coordinate display
+                document.getElementById('coordDisplay').textContent =
+                    `X: ${Math.round(snappedPos.x)}, Y: ${Math.round(snappedPos.y)}`;
+
+                // Handle Split Line Dragging
+                if (this.splitMode && this.isDragging && this.splitStep === 1) {
+                    if (this.splitLineStart) {
+                        this.updateSplitLineConstraint(snappedPos);
+                        this.render();
+                    }
+                    return;
+                }
 
                 // Check if we should start panning from empty space touch
                 if (this.panStartPos && this.dragStart && !this.isDragging && !this.isPanning &&
@@ -3805,7 +3889,7 @@
                         this.isPanning = true;
                         this.canvas.style.cursor = 'grabbing';
                         // Deselect any selected polygon when starting to pan
-                        if (this.selectedPolygon) {
+                        if (this.selectedPolygon && !this.selectedVertex) {
                             this.selectedPolygon = null;
                             this.selectedVertex = null;
                             this.updateProperties();
@@ -3823,16 +3907,30 @@
                     return;
                 }
 
-                // Otherwise handle as normal mouse move
-                const mouseEvent = new MouseEvent('mousemove', {
-                    clientX: touch.clientX,
-                    clientY: touch.clientY,
-                    bubbles: true
-                });
-                this.handleMouseMove(mouseEvent);
+                // Handle dragging selected polygon or vertex
+                if (this.isDragging) {
+                    if (this.selectedVertex) {
+                        // Drag vertex
+                        this.selectedVertex.x = snappedPos.x;
+                        this.selectedVertex.y = snappedPos.y;
+                        this.render();
+                    } else if (this.selectedPolygon && this.dragStart) {
+                        // Drag polygon
+                        const dx = snappedPos.x - this.dragStart.x;
+                        const dy = snappedPos.y - this.dragStart.y;
+                        this.selectedPolygon.move(dx, dy);
+                        this.dragStart = snappedPos;
+                        this.render();
+                    }
+                }
             }
 
             handleTouchEnd(e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                // Update last touch time
+                this.lastTouchTime = Date.now();
                 this.isPinching = false;
 
                 // Handle touch end similar to mouse up
@@ -3842,7 +3940,12 @@
                     this.updateCursor();
                 }
 
-                // If we clicked but didn't pan (touched empty space without dragging)
+                // Save history if we dragged something
+                if (this.isDragging && (this.selectedVertex || this.selectedPolygon)) {
+                    this.saveHistory();
+                }
+
+                // If we tapped (didn't pan or drag), handle tap
                 if (this.panStartPos && !this.isPanning && !this.isDragging && this.currentTool === 'select') {
                     const touch = e.changedTouches[0];
                     if (touch) {
@@ -3854,7 +3957,7 @@
                             Math.pow(y - this.panStartPos.y, 2)
                         );
 
-                        // If we didn't move much, treat as a tap to deselect
+                        // If we didn't move much, treat as a tap
                         if (moveDistance <= this.panThreshold * 0.7) {
                             const worldPos = this.screenToWorld(x, y);
                             const snappedPos = this.snapToGrid(worldPos);
@@ -3871,14 +3974,11 @@
                     }
                 }
 
-                if (this.isDragging && (this.selectedVertex || this.selectedPolygon)) {
-                    this.saveHistory();
-                }
-
+                // Reset drag state
                 this.isDragging = false;
-                this.isPanning = false;
                 this.dragStart = null;
                 this.panStartPos = null;
+                this.touchStartTime = null;
             }
 
             handleKeyDown(e) {
