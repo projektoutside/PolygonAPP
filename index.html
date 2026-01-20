@@ -344,16 +344,18 @@
         /* Toolbar - Compact Top Bar for All Devices */
         .toolbar {
             position: fixed;
-            top: clamp(36px, 4.5vw, 44px);
+            top: clamp(48px, 6vw, 56px);
             /* Pushed down by top tools bar */
             left: 0;
             right: 0;
             width: 100%;
             background: white;
             border-bottom: 1px solid var(--color-border);
-            padding: clamp(4px, 0.5vw, 6px) clamp(4px, 0.5vw, 8px);
+            padding: clamp(8px, 1.5vw, 12px);
+            /* Increased padding */
             display: flex;
-            gap: clamp(2px, 0.25vw, 3px);
+            gap: clamp(8px, 2vw, 12px);
+            /* Increased gap significantly */
             z-index: var(--z-toolbar);
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             align-items: center;
@@ -364,24 +366,25 @@
             -webkit-overflow-scrolling: touch;
             scrollbar-width: thin;
             scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
-            min-height: clamp(36px, 4.5vw, 44px);
-            max-height: clamp(36px, 4.5vw, 44px);
+            min-height: clamp(48px, 6vw, 56px);
+            /* Increased height */
+            max-height: clamp(60px, 8vw, 70px);
             box-sizing: border-box;
         }
 
         /* Ensure toolbar buttons fit on small screens */
         @media (max-width: 320px) {
             .toolbar {
-                padding: clamp(3px, 0.4vw, 5px) clamp(2px, 0.25vw, 4px);
-                gap: clamp(1px, 0.125vw, 2px);
+                padding: 8px;
+                gap: 6px;
             }
 
             .tool-btn {
-                width: clamp(28px, 3.5vw, 36px);
-                min-width: clamp(28px, 3.5vw, 36px);
-                height: clamp(26px, 3.25vw, 34px);
-                min-height: clamp(26px, 3.25vw, 34px);
-                font-size: clamp(12px, 1.5vw, 16px);
+                width: 36px;
+                min-width: 36px;
+                height: 36px;
+                min-height: 36px;
+                font-size: 16px;
             }
         }
 
@@ -402,26 +405,34 @@
             background: rgba(0, 0, 0, 0.3);
         }
 
-
         .tool-btn {
-            width: clamp(32px, 4vw, 40px);
-            min-width: clamp(32px, 4vw, 40px);
-            height: clamp(28px, 3.5vw, 36px);
-            min-height: clamp(28px, 3.5vw, 36px);
+            width: clamp(40px, 5vw, 48px);
+            /* Larger touch target */
+            min-width: clamp(40px, 5vw, 48px);
+            height: clamp(40px, 5vw, 48px);
+            min-height: clamp(40px, 5vw, 48px);
             border: none;
             background: #f0f0f0;
-            border-radius: var(--radius-sm);
+            border-radius: var(--radius-md);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: clamp(14px, 1.75vw, 18px);
+            font-size: clamp(18px, 2.5vw, 22px);
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
             flex-shrink: 0;
             touch-action: manipulation;
             padding: 0;
             margin: 0;
+        }
+
+        .tool-btn.combine-btn,
+        .tool-btn.split-btn {
+            width: auto;
+            padding: 0 16px;
+            font-size: 14px;
+            font-weight: 600;
         }
 
         .tool-btn:hover {
@@ -1148,11 +1159,13 @@
             left: 0;
             right: 0;
             width: 100%;
-            height: clamp(36px, 4.5vw, 44px);
+            height: clamp(48px, 6vw, 56px);
+            /* Increased height matches toolbar */
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: var(--spacing-md);
+            gap: 24px;
+            /* Fixed generous gap */
             background: white;
             padding: 0 16px;
             border-bottom: 1px solid rgba(0, 0, 0, 0.05);
@@ -1421,6 +1434,35 @@
             transition: width 0.3s ease, height 0.3s ease, transform 0.3s ease;
         }
 
+        /* Zoom Controls - Responsive Positioning */
+        .zoom-controls {
+            position: absolute;
+            bottom: clamp(60px, 8vw, 80px);
+            /* Pushed up to avoid bottom panel overlap */
+            right: clamp(16px, 2vw, 24px);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: var(--z-canvas-ui);
+        }
+
+        /* Coordinate Display */
+        .coord-display {
+            position: absolute;
+            bottom: clamp(60px, 8vw, 80px);
+            /* Pushed up */
+            left: clamp(16px, 2vw, 24px);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 6px 12px;
+            border-radius: var(--radius-md);
+            font-family: monospace;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: var(--z-canvas-ui);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(4px);
+        }
+
         /* Bottom Properties Panel */
         .bottom-panel {
             width: 100%;
@@ -1438,6 +1480,10 @@
         .bottom-panel.collapsed {
             height: 40px;
             /* Header height only */
+        }
+
+        .bottom-panel.collapsed .bottom-panel-content {
+            display: none;
         }
 
         .bottom-panel-header {
@@ -1773,7 +1819,7 @@
     <!-- Learn Geometry Full Page -->
     <div id="learnPage">
         <div class="learn-header">
-            <h1>🎓 Learn Geometry</h1>
+            <h1>🎓 Learn Polygon</h1>
             <button class="close-learn-btn" id="closeLearnPageBtn">
                 <span>Back to App</span>
                 ✕
@@ -2200,6 +2246,7 @@
                 this.setupColorPicker();
                 this.setupLearnPanel();
                 this.setupResizablePanels();
+                this.setupBottomPanel();
                 this.setupShapeMenu();
                 this.setupResponsiveHandlers();
 
@@ -2328,20 +2375,64 @@
                     });
                 }
 
-                this.setupBottomPanel();
             }
 
             setupBottomPanel() {
-                const toggleBtn = document.getElementById('bottomPanelToggle');
-                const panel = document.getElementById('bottomPropertiesPanel');
+                const setupPanel = () => {
+                    const panel = document.getElementById('bottomPropertiesPanel');
+                    const header = document.querySelector('#bottomPropertiesPanel .bottom-panel-header');
+                    const toggleButton = document.getElementById('bottomPanelToggle');
 
-                if (toggleBtn && panel) {
-                    toggleBtn.addEventListener('click', () => {
+                    if (!panel || !header || !toggleButton) {
+                        // Retry if elements not found yet
+                        setTimeout(setupPanel, 50);
+                        return;
+                    }
+
+                    // Helper function to toggle the panel
+                    const togglePanel = () => {
                         panel.classList.toggle('collapsed');
+                        panel.classList.toggle('expanded');
                         // Trigger resize to adjust canvas
                         setTimeout(() => this.resizeCanvas(), 310);
+                    };
+
+                    // Handle header click first - but ignore clicks on the button
+                    header.addEventListener('click', (e) => {
+                        // Check if the click originated from the button or its children
+                        const clickedButton = e.target.closest('.bottom-panel-toggle') || 
+                                            e.target.closest('#bottomPanelToggle');
+                        if (clickedButton || e.target === toggleButton) {
+                            return; // Let button handler deal with it
+                        }
+                        e.preventDefault();
+                        togglePanel();
                     });
-                }
+
+                    // Handle button click - stop propagation so header doesn't also trigger
+                    toggleButton.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        togglePanel();
+                        return false;
+                    });
+
+                    // Also handle clicks on the toggle icon span inside the button
+                    const toggleIcon = toggleButton.querySelector('.toggle-icon');
+                    if (toggleIcon) {
+                        toggleIcon.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                            togglePanel();
+                            return false;
+                        });
+                    }
+                };
+
+                // Try immediately, then with small delay if needed
+                setupPanel();
             }
 
             setupCanvas() {
@@ -2365,6 +2456,12 @@
                     // Set CSS size to maintain aspect ratio
                     this.canvas.style.width = rect.width + 'px';
                     this.canvas.style.height = rect.height + 'px';
+
+                    // If there's a sample triangle, re-center the view on it
+                    if (this.polygons.length > 0 && this.polygons[0].name === 'Triangle 1') {
+                        const triangleCenter = this.getPolygonCenter(this.polygons[0]);
+                        this.centerViewOn(triangleCenter.x, triangleCenter.y);
+                    }
 
                     this.render();
                 });
@@ -2842,11 +2939,44 @@
                 });
             }
 
+            // Calculate the centroid (geometric center) of a polygon
+            getPolygonCenter(polygon) {
+                if (!polygon || !polygon.vertices || polygon.vertices.length === 0) {
+                    return { x: 0, y: 0 };
+                }
+                const sum = polygon.vertices.reduce((acc, v) => ({ x: acc.x + v.x, y: acc.y + v.y }), { x: 0, y: 0 });
+                return {
+                    x: sum.x / polygon.vertices.length,
+                    y: sum.y / polygon.vertices.length
+                };
+            }
+
+            // Center the view on a specific world coordinate
+            centerViewOn(worldX, worldY) {
+                // To center world point (worldX, worldY) at viewport center:
+                // Viewport center in world coords = screenToWorld(cssWidth/2, cssHeight/2)
+                // We want: screenToWorld(cssWidth/2, cssHeight/2) = (worldX, worldY)
+                // From screenToWorld: (cssWidth/2 - cssWidth/2 - pan.x) / zoom = worldX
+                // So: -pan.x / zoom = worldX
+                // Therefore: pan.x = -worldX * zoom
+                // Similarly: pan.y = -worldY * zoom
+                const rect = this.canvas.getBoundingClientRect();
+                const cssWidth = rect.width;
+                const cssHeight = rect.height;
+                
+                // Calculate pan needed to center the world point at viewport center
+                this.pan.x = -worldX * this.zoom;
+                this.pan.y = -worldY * this.zoom;
+            }
+
             createSamplePolygon() {
-                // Create a sample triangle centered on viewport, snapped to grid
-                const viewportCenter = this.getViewportCenter();
-                const centerX = viewportCenter.x;
-                const centerY = viewportCenter.y;
+                // Reset pan and zoom to ensure consistent initial state
+                this.pan = { x: 0, y: 0 };
+                this.zoom = 1;
+                
+                // Create a triangle at world origin (0,0) snapped to grid
+                const centerX = 0;
+                const centerY = 0;
 
                 // Equilateral triangle, 60 units per side (snapped to grid)
                 const triSize = Math.round(60 / this.gridSize) * this.gridSize;
@@ -2862,6 +2992,10 @@
 
                 // Select the default polygon so properties are visible immediately
                 this.selectedPolygon = triangle;
+
+                // Center the view on the triangle
+                const triangleCenter = this.getPolygonCenter(triangle);
+                this.centerViewOn(triangleCenter.x, triangleCenter.y);
 
                 this.saveHistory();
                 this.updateProperties();
@@ -3088,20 +3222,24 @@
                     prompt.id = 'splitPrompt';
                     prompt.style.cssText = `
                         position: absolute;
-                        top: 80px;
+                        top: 130px; /* Moved down to avoid toolbar overlap */
                         left: 50%;
                         transform: translateX(-50%);
-                        background: var(--color-primary-dark, #764ba2);
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                         color: white;
-                        padding: 8px 16px;
+                        padding: 10px 20px;
                         border-radius: 20px;
                         font-size: 14px;
                         font-weight: 600;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
                         z-index: 1000;
                         pointer-events: none;
                         white-space: nowrap;
                         animation: fadeIn 0.3s ease-out;
+                        max-width: 90%;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        text-align: center;
                     `;
                     document.querySelector('.canvas-container').appendChild(prompt);
                 }
@@ -3187,16 +3325,24 @@
 
             // Canvas coordinate helpers
             screenToWorld(x, y) {
+                // Use CSS dimensions for coordinate conversion
+                const rect = this.canvas.getBoundingClientRect();
+                const cssWidth = rect.width;
+                const cssHeight = rect.height;
                 return {
-                    x: (x - this.canvas.width / 2 - this.pan.x) / this.zoom,
-                    y: (y - this.canvas.height / 2 - this.pan.y) / this.zoom
+                    x: (x - cssWidth / 2 - this.pan.x) / this.zoom,
+                    y: (y - cssHeight / 2 - this.pan.y) / this.zoom
                 };
             }
 
             worldToScreen(x, y) {
+                // Use CSS dimensions for coordinate conversion
+                const rect = this.canvas.getBoundingClientRect();
+                const cssWidth = rect.width;
+                const cssHeight = rect.height;
                 return {
-                    x: x * this.zoom + this.canvas.width / 2 + this.pan.x,
-                    y: y * this.zoom + this.canvas.height / 2 + this.pan.y
+                    x: x * this.zoom + cssWidth / 2 + this.pan.x,
+                    y: y * this.zoom + cssHeight / 2 + this.pan.y
                 };
             }
 
@@ -3210,9 +3356,10 @@
 
             // Get the center of the current viewport in world coordinates, snapped to grid
             getViewportCenter() {
-                // Center of canvas in screen coordinates
-                const centerX = this.canvas.width / 2;
-                const centerY = this.canvas.height / 2;
+                // Get CSS dimensions (not device pixel dimensions)
+                const rect = this.canvas.getBoundingClientRect();
+                const centerX = rect.width / 2;
+                const centerY = rect.height / 2;
 
                 // Convert to world coordinates
                 const worldCenter = this.screenToWorld(centerX, centerY);
@@ -3931,8 +4078,13 @@
                 // Save context state
                 this.ctx.save();
 
+                // Get CSS dimensions for coordinate calculations (context is already scaled by DPR)
+                const rect = this.canvas.getBoundingClientRect();
+                const cssWidth = rect.width;
+                const cssHeight = rect.height;
+
                 // Apply transformations
-                this.ctx.translate(this.canvas.width / 2 + this.pan.x, this.canvas.height / 2 + this.pan.y);
+                this.ctx.translate(cssWidth / 2 + this.pan.x, cssHeight / 2 + this.pan.y);
                 this.ctx.scale(this.zoom, this.zoom);
 
                 // Draw grid
@@ -3992,11 +4144,16 @@
                 this.ctx.strokeStyle = '#e0e0e0';
                 this.ctx.lineWidth = 1 / this.zoom;
 
+                // Get CSS dimensions for coordinate calculations
+                const rect = this.canvas.getBoundingClientRect();
+                const cssWidth = rect.width;
+                const cssHeight = rect.height;
+
                 const viewBounds = {
-                    left: -this.canvas.width / (2 * this.zoom) - this.pan.x / this.zoom,
-                    right: this.canvas.width / (2 * this.zoom) - this.pan.x / this.zoom,
-                    top: -this.canvas.height / (2 * this.zoom) - this.pan.y / this.zoom,
-                    bottom: this.canvas.height / (2 * this.zoom) - this.pan.y / this.zoom
+                    left: -cssWidth / (2 * this.zoom) - this.pan.x / this.zoom,
+                    right: cssWidth / (2 * this.zoom) - this.pan.x / this.zoom,
+                    top: -cssHeight / (2 * this.zoom) - this.pan.y / this.zoom,
+                    bottom: cssHeight / (2 * this.zoom) - this.pan.y / this.zoom
                 };
 
                 // Draw vertical lines
