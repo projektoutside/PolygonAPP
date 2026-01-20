@@ -3422,7 +3422,7 @@
 
                 // Mark grid for redraw since we changed selection
                 this.markGridForRedraw();
-                
+
                 this.saveHistory();
                 this.updateProperties();
                 this.updateLayers();
@@ -3517,7 +3517,7 @@
                 }
 
                 const polygonsToCombine = Array.from(this.combineSelection);
-                
+
                 // Validate that all polygons to combine still exist in the main array
                 const validPolygons = polygonsToCombine.filter(p => this.polygons.includes(p));
                 if (validPolygons.length !== polygonsToCombine.length) {
@@ -3527,200 +3527,78 @@
                     return;
                 }
 
-                // CRITICAL: Save history BEFORE attempting combine so undo works correctly
-                // This ensures users can undo if something goes wrong
+                // STEP 1: Try to compute union FIRST before modifying anything
+                // This is the key fix - validate the operation CAN succeed before touching state
+                let unionResultVertices;
+                try {
+                    unionResultVertices = PolygonBoolean.union(polygonsToCombine);
+                } catch (e) {
+                    console.error('Union computation error:', e);
+                    alert('Error combining polygons: ' + (e.message || e.toString()));
+                    // Don't exit combine mode - let user try again or manually cancel
+                    return;
+                }
+
+                // STEP 2: Validate union result BEFORE modifying any state
+                if (!unionResultVertices ||
+                    !Array.isArray(unionResultVertices) ||
+                    unionResultVertices.length < 3 ||
+                    !unionResultVertices.every(v => v && typeof v.x === 'number' && typeof v.y === 'number' && isFinite(v.x) && isFinite(v.y))) {
+                    // Union failed - do NOT modify any state, no history saved
+                    console.warn('Union failed - invalid result', {
+                        polygonsToCombine: polygonsToCombine.length,
+                        result: unionResultVertices,
+                        resultType: typeof unionResultVertices,
+                        resultLength: unionResultVertices ? unionResultVertices.length : 'null/undefined'
+                    });
+                    alert('Could not combine polygons. Ensure they overlap or touch to form a valid shape.');
+                    // Don't exit combine mode - let user adjust selection or cancel
+                    return;
+                }
+
+                // STEP 3: Validate polygon has valid area (not degenerate)
+                const area = Math.abs(PolygonBoolean.getArea(unionResultVertices));
+                if (!isFinite(area) || area < 1e-6) {
+                    console.warn('Combined polygon would be degenerate', { area });
+                    alert('Combined polygon would be too small or invalid.');
+                    return;
+                }
+
+                // STEP 4: Create new polygon and validate it
+                const newPoly = new Polygon(unionResultVertices, this.currentColor);
+                newPoly.name = 'Combined Polygon ' + (this.polygons.length + 1);
+
+                if (!newPoly.vertices || newPoly.vertices.length < 3) {
+                    console.error('New polygon creation failed');
+                    alert('Error: Could not create combined polygon.');
+                    return;
+                }
+
+                // STEP 5: NOW save history since we know the operation will succeed
+                // This is the critical fix - history is only saved after validation passes
                 this.saveHistory();
 
-                // Store original state for validation and potential restoration
-                const originalCount = this.polygons.length;
+                // STEP 6: Perform the atomic state modification
+                // Remove old polygons and add new one
                 const polygonsToRemove = new Set(this.combineSelection);
-                const originalPolygonsSnapshot = polygonsToCombine.map(p => ({
-                    vertices: p.vertices.map(v => ({ x: v.x, y: v.y })),
-                    color: p.color,
-                    name: p.name,
-                    visible: p.visible
-                }));
+                this.polygons = this.polygons.filter(p => !polygonsToRemove.has(p));
+                this.polygons.push(newPoly);
 
-                try {
-                    const unionResultVertices = PolygonBoolean.union(polygonsToCombine);
+                // STEP 7: Update UI
+                this.selectedPolygon = newPoly;
+                this.updateProperties();
+                this.updateLayers();
+                this.exitCombineMode();
+                this.setTool('select');
+                this.render();
 
-                    // CRITICAL VALIDATION: Ensure union result is valid and actually represents a union
-                    if (!unionResultVertices || 
-                        !Array.isArray(unionResultVertices) || 
-                        unionResultVertices.length < 3 ||
-                        !unionResultVertices.every(v => v && typeof v.x === 'number' && typeof v.y === 'number' && isFinite(v.x) && isFinite(v.y))) {
-                        // Union failed - do NOT remove any polygons
-                        console.warn('Union failed - invalid result', {
-                            polygonsToCombine: polygonsToCombine.length,
-                            result: unionResultVertices,
-                            resultType: typeof unionResultVertices,
-                            resultLength: unionResultVertices ? unionResultVertices.length : 'null/undefined'
-                        });
-                        alert('Could not combine polygons. Ensure they overlap and form a valid shape.');
-                        // CRITICAL: Ensure no polygons were removed - double check
-                        const currentPolygonSet = new Set(this.polygons);
-                        const missingAfterFailure = polygonsToCombine.filter(p => !currentPolygonSet.has(p));
-                        if (missingAfterFailure.length > 0) {
-                            console.error('CRITICAL: Polygons were removed even though union failed!', missingAfterFailure.length);
-                            // Restore via undo if possible
-                            if (this.historyIndex > 0) {
-                                this.undo();
-                            } else {
-                                // Restore manually
-                                this.polygons = [...this.polygons, ...missingAfterFailure];
-                                this.render();
-                            }
-                        }
-                        return; // Exit early - no polygons removed
-                    }
-                    
-                    // CRITICAL: Verify the union result represents a true union
-                    // When one polygon is completely inside another, union correctly returns just the outer one
-                    // This is valid behavior, but we need to ensure it's intentional
-                    // Check if result matches one input exactly (one inside other case)
-                    let resultIsOneInput = false;
-                    let matchedInputIndex = -1;
-                    
-                    for (let i = 0; i < polygonsToCombine.length; i++) {
-                        const poly = polygonsToCombine[i];
-                        if (poly.vertices.length !== unionResultVertices.length) continue;
-                        
-                        // Check if vertices match (allowing for rotation/offset)
-                        const tolerance = 1e-4;
-                        let matches = true;
-                        
-                        // Try matching from different starting points (in case of rotation)
-                        for (let offset = 0; offset < poly.vertices.length && matches; offset++) {
-                            matches = true;
-                            for (let j = 0; j < poly.vertices.length; j++) {
-                                const v1 = poly.vertices[j];
-                                const v2 = unionResultVertices[(j + offset) % unionResultVertices.length];
-                                if (Math.abs(v1.x - v2.x) > tolerance || Math.abs(v1.y - v2.y) > tolerance) {
-                                    matches = false;
-                                    break;
-                                }
-                            }
-                            if (matches) {
-                                resultIsOneInput = true;
-                                matchedInputIndex = i;
-                                break;
-                            }
-                        }
-                        if (resultIsOneInput) break;
-                    }
-                    
-                    if (resultIsOneInput && polygonsToCombine.length === 2) {
-                        // This is valid - one polygon is inside the other
-                        // The union IS just the outer polygon, which is correct
-                        // But we should verify this is the expected behavior
-                        console.log('Union result is one input polygon (one inside other) - this is valid union behavior');
-                    } else if (resultIsOneInput) {
-                        // For more than 2 polygons, if result matches one input, something might be wrong
-                        console.warn('Union result matches one input polygon with multiple inputs', {
-                            resultLength: unionResultVertices.length,
-                            inputCount: polygonsToCombine.length,
-                            matchedIndex: matchedInputIndex
-                        });
-                    }
-                    
-                    // Create new polygon
-                    const newPoly = new Polygon(unionResultVertices, this.currentColor);
-                    newPoly.name = 'Combined Polygon ' + (this.polygons.length + 1);
-
-                    // Verify the new polygon is valid
-                    if (!newPoly.vertices || newPoly.vertices.length < 3) {
-                        throw new Error('Combined polygon is invalid - has less than 3 vertices');
-                    }
-                    
-                    // Verify polygon has valid area (not degenerate)
-                    const area = Math.abs(PolygonBoolean.getArea(newPoly.vertices));
-                    if (!isFinite(area) || area < 1e-6) {
-                        throw new Error('Combined polygon is degenerate - area too small or invalid');
-                    }
-
-                    // CRITICAL: Create backup before modifying polygons array
-                    const backupPolygons = this.polygons.map(p => ({
-                        vertices: p.vertices.map(v => ({ x: v.x, y: v.y })),
-                        color: p.color,
-                        name: p.name,
-                        visible: p.visible
-                    }));
-
-                    // Remove old polygons only after ALL validations pass
-                    this.polygons = this.polygons.filter(p => !polygonsToRemove.has(p));
-
-                    // Verify polygons were actually removed
-                    const removedCount = originalCount - this.polygons.length;
-                    if (removedCount !== polygonsToRemove.size) {
-                        console.error('Polygon removal count mismatch', {
-                            original: originalCount,
-                            removed: polygonsToRemove.size,
-                            expected: originalCount - polygonsToRemove.size,
-                            actual: this.polygons.length,
-                            removedCount: removedCount
-                        });
-                        // Restore from backup
-                        this.restorePolygonsFromBackup(backupPolygons);
-                        throw new Error(`Failed to remove original polygons correctly. Expected to remove ${polygonsToRemove.size}, but ${removedCount} were removed.`);
-                    }
-
-                    // Add new polygon
-                    this.polygons.push(newPoly);
-
-                    // Verify final count is correct
-                    const finalCount = this.polygons.length;
-                    const expectedCount = originalCount - polygonsToRemove.size + 1;
-                    if (finalCount !== expectedCount) {
-                        console.error('Final polygon count mismatch', {
-                            original: originalCount,
-                            removed: polygonsToRemove.size,
-                            expected: expectedCount,
-                            actual: finalCount
-                        });
-                        // Restore from backup
-                        this.restorePolygonsFromBackup(backupPolygons);
-                        throw new Error(`Final polygon count is incorrect. Expected ${expectedCount}, got ${finalCount}.`);
-                    }
-                    
-                    // Final validation: ensure new polygon is actually in the array
-                    if (!this.polygons.includes(newPoly)) {
-                        console.error('New polygon not found in array after addition');
-                        this.restorePolygonsFromBackup(backupPolygons);
-                        throw new Error('New polygon was not properly added to array');
-                    }
-
-                    // All validations passed - update UI
-                    this.selectedPolygon = newPoly;
-                    this.updateProperties();
-                    this.updateLayers();
-                    this.exitCombineMode();
-                    this.setTool('select');
-                    this.render();
-                    
-                } catch (e) {
-                    console.error('Error combining polygons:', e);
-                    alert('Error combining polygons: ' + (e.message || e.toString()));
-                    
-                    // CRITICAL: Restore polygons from backup if available
-                    // Re-add any polygons that might have been removed
-                    const currentPolygons = new Set(this.polygons);
-                    const missingPolygons = polygonsToCombine.filter(p => !currentPolygons.has(p));
-                    
-                    if (missingPolygons.length > 0) {
-                        console.warn('Restoring missing polygons after error', missingPolygons.length);
-                        // Restore missing polygons
-                        this.polygons = [...this.polygons, ...missingPolygons];
-                        this.render();
-                    }
-                    
-                    // Use undo to restore state if history is available
-                    if (this.historyIndex > 0) {
-                        console.log('Attempting to restore state via undo');
-                        this.undo();
-                    }
-                }
+                console.log('Combine successful', {
+                    removedCount: polygonsToRemove.size,
+                    newPolygonVertices: newPoly.vertices.length,
+                    totalPolygons: this.polygons.length
+                });
             }
-            
+
             // Helper function to restore polygons from backup
             restorePolygonsFromBackup(backup) {
                 this.polygons = backup.map(p => {
@@ -5147,7 +5025,7 @@
                 // ALWAYS draw the grid - disable aggressive caching that was causing issues
                 // The grid must be drawn every frame to ensure it's always visible
                 // Performance is acceptable since grid drawing is already optimized
-                
+
                 // Update state tracking (for potential future optimizations)
                 // But never skip drawing based on this
                 this.lastGridState = currentGridState;
@@ -5192,7 +5070,7 @@
                 // Normal grid rendering - optimized batch drawing
                 // For optimal visibility, always draw the main grid
                 this.drawGridLines(viewBounds, this.gridSize, false);
-                
+
                 // Restore context state after drawing grid
                 this.ctx.restore();
             }
@@ -5309,7 +5187,7 @@
             drawPolygon(polygon, selected = false) {
                 // Save context state before drawing polygon to ensure grid isn't affected
                 this.ctx.save();
-                
+
                 const vertices = polygon.vertices;
                 if (vertices.length < 2) {
                     this.ctx.restore();
@@ -5354,7 +5232,7 @@
                     this.ctx.fill();
                     this.ctx.stroke();
                 }
-                
+
                 // Restore context state after drawing polygon
                 this.ctx.restore();
             }
@@ -6103,7 +5981,7 @@
                     this.cancelCurrentAction();
                     this.historyIndex--;
                     this.loadState(this.history[this.historyIndex]);
-                    
+
                     // Update UI to reflect undo
                     this.updateProperties();
                     this.updateLayers();
@@ -6118,7 +5996,7 @@
                     this.cancelCurrentAction();
                     this.historyIndex++;
                     this.loadState(this.history[this.historyIndex]);
-                    
+
                     // Update UI to reflect redo
                     this.updateProperties();
                     this.updateLayers();
@@ -6135,13 +6013,13 @@
                     const selectedIndex = this.selectedPolygon ? this.polygons.indexOf(this.selectedPolygon) : -1;
 
                     const data = JSON.parse(state);
-                    
+
                     // Validate parsed data
                     if (!Array.isArray(data)) {
                         console.error('Invalid state data - not an array');
                         return;
                     }
-                    
+
                     // Recreate polygons from state
                     this.polygons = data.map(p => {
                         if (!p || !p.vertices || !Array.isArray(p.vertices) || p.vertices.length < 3) {
@@ -6863,8 +6741,8 @@
                         const outerBoundary = this.getOuterBoundary(combinedCycles);
                         if (outerBoundary && Array.isArray(outerBoundary) && outerBoundary.length >= 3) {
                             // Validate the outer boundary has valid vertices
-                            const hasValidVertices = outerBoundary.every(v => 
-                                v && typeof v.x === 'number' && typeof v.y === 'number' && 
+                            const hasValidVertices = outerBoundary.every(v =>
+                                v && typeof v.x === 'number' && typeof v.y === 'number' &&
                                 isFinite(v.x) && isFinite(v.y)
                             );
                             if (hasValidVertices) {
@@ -6887,7 +6765,7 @@
                         // 1. Polygons are completely disjoint (no overlap)
                         // 2. One polygon is completely inside the other (should have been handled)
                         // 3. Union algorithm failed due to edge case
-                        
+
                         console.warn('Union returned no cycles', {
                             resultLength: result.length,
                             clipLength: clip.length
@@ -6896,7 +6774,7 @@
                         // Check if polygons overlap or touch
                         let hasOverlap = false;
                         let areTouching = false;
-                        
+
                         // Check vertex overlap
                         for (let v of clip) {
                             const rel = this.pointRelation(v, result);
@@ -6914,7 +6792,7 @@
                                 }
                             }
                         }
-                        
+
                         // Check if polygons are touching (edges intersect or share vertices)
                         if (!hasOverlap) {
                             const segsResult = this.getSegments(result);
@@ -6938,9 +6816,10 @@
                         }
 
                         if (!hasOverlap && !areTouching) {
-                            // Polygons are completely disjoint - return null
+                            // Return empty array instead of null for clearer handling
+                            // This specifically indicates disjoint polygons (can't be combined)
                             console.warn('Polygons are disjoint - cannot combine');
-                            return null;
+                            return [];
                         } else {
                             // Polygons overlap or touch but union failed
                             // Try to create a bounding polygon as fallback
@@ -6951,7 +6830,7 @@
                                 return boundingPoly;
                             }
                             console.warn('Union failed: polygons overlap but could not create result');
-                            return null;
+                            return [];
                         }
                     }
                 }
@@ -6959,8 +6838,8 @@
                 // Final validation of result
                 if (result && Array.isArray(result) && result.length >= 3) {
                     // Validate all vertices are valid
-                    const hasValidVertices = result.every(v => 
-                        v && typeof v.x === 'number' && typeof v.y === 'number' && 
+                    const hasValidVertices = result.every(v =>
+                        v && typeof v.x === 'number' && typeof v.y === 'number' &&
                         isFinite(v.x) && isFinite(v.y)
                     );
                     return hasValidVertices ? result : null;
@@ -7099,7 +6978,7 @@
                     polyA[0],
                     polyA[Math.floor(polyA.length / 2)]
                 ].filter(p => p);
-                
+
                 const testPointsB = [
                     this.getPolygonCenter(polyB),
                     polyB[0],
@@ -7108,14 +6987,14 @@
 
                 let aCompletelyInB = true;
                 let bCompletelyInA = true;
-                
+
                 for (let p of testPointsA) {
                     if (this.pointRelation(p, polyB) === 1) {
                         aCompletelyInB = false;
                         break;
                     }
                 }
-                
+
                 for (let p of testPointsB) {
                     if (this.pointRelation(p, polyA) === 1) {
                         bCompletelyInA = false;
@@ -7137,7 +7016,7 @@
 
                 for (let seg of allSegs) {
                     const otherPoly = seg.origin === 'A' ? polyB : polyA;
-                    
+
                     // Check multiple points along the segment, not just the midpoint
                     // This is crucial for overlapping triangles where midpoint might be inside
                     // but the segment is partially outside
@@ -7148,11 +7027,11 @@
                         { x: seg.p1.x + (seg.p2.x - seg.p1.x) * 0.25, y: seg.p1.y + (seg.p2.y - seg.p1.y) * 0.25 },
                         { x: seg.p1.x + (seg.p2.x - seg.p1.x) * 0.75, y: seg.p1.y + (seg.p2.y - seg.p1.y) * 0.75 }
                     ];
-                    
+
                     let allInside = true;
                     let allOutside = true;
                     let anyOnBoundary = false;
-                    
+
                     for (let testPoint of testPoints) {
                         const relation = this.pointRelation(testPoint, otherPoly);
                         if (relation === 0) {
@@ -7203,7 +7082,7 @@
                                 };
                                 const offsetInA = this.pointRelation(offsetPoint, polyA);
                                 const offsetInB = this.pointRelation(offsetPoint, polyB);
-                                
+
                                 // If offset is inside both, it's truly internal - discard
                                 // Otherwise, it's on the boundary - keep one
                                 if (offsetInA === -1 && offsetInB === -1) {
@@ -7222,7 +7101,7 @@
                         }
                     }
                 }
-                
+
                 // If no segments kept, one polygon might be completely inside the other
                 // This should have been caught above, but as a fallback:
                 if (keptSegs.length === 0) {
@@ -7237,9 +7116,9 @@
                     const areaB = Math.abs(this.getArea(polyB));
                     return areaA >= areaB ? [polyA] : [polyB];
                 }
-                
+
                 const cycles = this.linkSegments(keptSegs);
-                
+
                 // If linkSegments fails but we had segments, log warning
                 if (!cycles || cycles.length === 0) {
                     console.warn('linkSegments returned no cycles despite having segments', {
@@ -7250,19 +7129,19 @@
                     // Return null to indicate failure - let the calling code handle it
                     return null;
                 }
-                
+
                 return cycles;
             }
-            
+
             static getPolygonCenter(vertices) {
                 if (!vertices || vertices.length === 0) return null;
                 const sum = vertices.reduce((acc, v) => ({ x: acc.x + v.x, y: acc.y + v.y }), { x: 0, y: 0 });
                 return { x: sum.x / vertices.length, y: sum.y / vertices.length };
             }
-            
+
             static createBoundingPolygon(vertices) {
                 if (!vertices || vertices.length < 3) return null;
-                
+
                 // Remove duplicate vertices first
                 const unique = [];
                 const seen = new Set();
@@ -7273,19 +7152,19 @@
                         unique.push({ x: v.x, y: v.y });
                     }
                 }
-                
+
                 if (unique.length < 3) return null;
-                
+
                 // Find convex hull using Graham scan
                 // First, find the bottom-most point (or leftmost in case of tie)
                 let start = 0;
                 for (let i = 1; i < unique.length; i++) {
-                    if (unique[i].y < unique[start].y || 
+                    if (unique[i].y < unique[start].y ||
                         (unique[i].y === unique[start].y && unique[i].x < unique[start].x)) {
                         start = i;
                     }
                 }
-                
+
                 // Sort points by polar angle with respect to start point
                 const sorted = unique.map((v, i) => ({ ...v, idx: i }))
                     .filter((v, i) => i !== start)
@@ -7299,7 +7178,7 @@
                         }
                         return angleA - angleB;
                     });
-                
+
                 const hull = [{ x: unique[start].x, y: unique[start].y }];
                 for (let point of sorted) {
                     while (hull.length > 1) {
@@ -7311,7 +7190,7 @@
                     }
                     hull.push({ x: point.x, y: point.y });
                 }
-                
+
                 // Ensure we have at least 3 points and close the hull
                 if (hull.length >= 3) {
                     // Make sure it's closed (first and last should be same, or close enough)
@@ -7322,7 +7201,7 @@
                     }
                     return this.ensureClockwise(hull);
                 }
-                
+
                 return null;
             }
 
