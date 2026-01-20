@@ -2505,6 +2505,10 @@
                 // Combine Tool State
                 this.combineMode = false;
                 this.combineSelection = new Set();
+                // For cycling through overlapping polygons in combine mode
+                this.combineLastClickPos = null;
+                this.combineLastClickTime = 0;
+                this.combineCycleIndex = 0;
 
                 // Split Tool State
                 this.splitMode = false;
@@ -3464,6 +3468,10 @@
             enterCombineMode() {
                 this.combineMode = true;
                 this.combineSelection.clear();
+                // Reset cycling state for fresh start
+                this.combineLastClickPos = null;
+                this.combineLastClickTime = 0;
+                this.combineCycleIndex = 0;
                 this.setTool('combine'); // Visual update for button
 
                 // Update button text or style to indicate "Execute"
@@ -3527,76 +3535,273 @@
                     return;
                 }
 
-                // STEP 1: Try to compute union FIRST before modifying anything
-                // This is the key fix - validate the operation CAN succeed before touching state
-                let unionResultVertices;
+                // CRITICAL SAFETY: Deep clone the ENTIRE state before ANY operation
+                // This allows complete restoration if anything goes wrong
+                const stateBackup = {
+                    polygons: this.polygons.map(p => ({
+                        vertices: p.vertices.map(v => ({ x: v.x, y: v.y })),
+                        color: p.color,
+                        name: p.name,
+                        visible: p.visible
+                    })),
+                    selectedPolygonName: this.selectedPolygon ? this.selectedPolygon.name : null,
+                    combineSelectionNames: polygonsToCombine.map(p => p.name)
+                };
+
                 try {
-                    unionResultVertices = PolygonBoolean.union(polygonsToCombine);
-                } catch (e) {
-                    console.error('Union computation error:', e);
-                    alert('Error combining polygons: ' + (e.message || e.toString()));
-                    // Don't exit combine mode - let user try again or manually cancel
-                    return;
-                }
+                    // STEP 1: Try to compute union
+                    let unionResultVertices = null;
+                    let unionError = null;
 
-                // STEP 2: Validate union result BEFORE modifying any state
-                if (!unionResultVertices ||
-                    !Array.isArray(unionResultVertices) ||
-                    unionResultVertices.length < 3 ||
-                    !unionResultVertices.every(v => v && typeof v.x === 'number' && typeof v.y === 'number' && isFinite(v.x) && isFinite(v.y))) {
-                    // Union failed - do NOT modify any state, no history saved
-                    console.warn('Union failed - invalid result', {
-                        polygonsToCombine: polygonsToCombine.length,
-                        result: unionResultVertices,
-                        resultType: typeof unionResultVertices,
-                        resultLength: unionResultVertices ? unionResultVertices.length : 'null/undefined'
+                    try {
+                        unionResultVertices = PolygonBoolean.union(polygonsToCombine);
+                    } catch (e) {
+                        unionError = e;
+                        console.error('Union computation error:', e);
+                    }
+
+                    // STEP 2: Validate union result
+                    const isValidUnion = unionResultVertices &&
+                        Array.isArray(unionResultVertices) &&
+                        unionResultVertices.length >= 3 &&
+                        unionResultVertices.every(v =>
+                            v &&
+                            typeof v.x === 'number' &&
+                            typeof v.y === 'number' &&
+                            isFinite(v.x) &&
+                            isFinite(v.y)
+                        );
+
+                    if (!isValidUnion) {
+                        // Union failed - try convex hull fallback for overlapping polygons
+                        console.warn('Standard union failed, trying convex hull fallback');
+
+                        // Collect all vertices from all polygons to combine
+                        const allVertices = [];
+                        for (const poly of polygonsToCombine) {
+                            for (const v of poly.vertices) {
+                                allVertices.push({ x: v.x, y: v.y });
+                            }
+                        }
+
+                        // Check if polygons actually overlap or touch
+                        let polygonsOverlap = false;
+                        outer: for (let i = 0; i < polygonsToCombine.length; i++) {
+                            for (let j = i + 1; j < polygonsToCombine.length; j++) {
+                                const polyA = polygonsToCombine[i];
+                                const polyB = polygonsToCombine[j];
+                                // Check if any vertex of one is inside the other
+                                for (const v of polyA.vertices) {
+                                    if (polyB.containsPoint(v)) {
+                                        polygonsOverlap = true;
+                                        break outer;
+                                    }
+                                }
+                                for (const v of polyB.vertices) {
+                                    if (polyA.containsPoint(v)) {
+                                        polygonsOverlap = true;
+                                        break outer;
+                                    }
+                                }
+                                // Check for edge intersections
+                                for (let a = 0; a < polyA.vertices.length; a++) {
+                                    const a1 = polyA.vertices[a];
+                                    const a2 = polyA.vertices[(a + 1) % polyA.vertices.length];
+                                    for (let b = 0; b < polyB.vertices.length; b++) {
+                                        const b1 = polyB.vertices[b];
+                                        const b2 = polyB.vertices[(b + 1) % polyB.vertices.length];
+                                        if (this.segmentsIntersect(a1, a2, b1, b2)) {
+                                            polygonsOverlap = true;
+                                            break outer;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!polygonsOverlap) {
+                            // Polygons don't overlap - can't combine
+                            if (unionError) {
+                                alert('Error combining polygons: ' + (unionError.message || unionError.toString()));
+                            } else {
+                                alert('Could not combine polygons. Ensure they overlap or touch to form a valid shape.');
+                            }
+                            return; // Early return - no state was modified
+                        }
+
+                        // Create convex hull as fallback
+                        unionResultVertices = this.computeConvexHull(allVertices);
+
+                        if (!unionResultVertices || unionResultVertices.length < 3) {
+                            alert('Could not combine polygons. The union operation failed.');
+                            return; // Early return - no state was modified
+                        }
+
+                        console.log('Using convex hull fallback for combine');
+                    }
+
+                    // STEP 3: Validate polygon area
+                    const area = Math.abs(PolygonBoolean.getArea(unionResultVertices));
+                    if (!isFinite(area) || area < 1e-6) {
+                        console.warn('Combined polygon would be degenerate', { area });
+                        alert('Combined polygon would be too small or invalid.');
+                        return; // Early return - no state was modified
+                    }
+
+                    // STEP 4: Create new polygon
+                    const newPoly = new Polygon(unionResultVertices, this.currentColor);
+                    newPoly.name = 'Combined Polygon ' + (this.polygons.length + 1);
+
+                    if (!newPoly.vertices || newPoly.vertices.length < 3) {
+                        console.error('New polygon creation failed');
+                        alert('Error: Could not create combined polygon.');
+                        return; // Early return - no state was modified
+                    }
+
+                    // STEP 5: NOW save history - we're about to modify state
+                    // This saves the CURRENT state (before combine) for undo to return to
+                    this.saveHistory();
+
+                    // STEP 6: Modify state atomically
+                    const polygonsToRemove = new Set(this.combineSelection);
+                    const originalLength = this.polygons.length;
+                    this.polygons = this.polygons.filter(p => !polygonsToRemove.has(p));
+                    this.polygons.push(newPoly);
+
+                    // STEP 7: Verify modification was correct
+                    const expectedLength = originalLength - polygonsToRemove.size + 1;
+                    if (this.polygons.length !== expectedLength) {
+                        throw new Error(`Polygon count mismatch after combine: expected ${expectedLength}, got ${this.polygons.length}`);
+                    }
+
+                    // STEP 8: Save new state for redo functionality
+                    // This saves the COMBINED result so redo can restore it
+                    this.saveHistory();
+
+                    // STEP 9: Update UI
+                    this.selectedPolygon = newPoly;
+                    this.updateProperties();
+                    this.updateLayers();
+                    this.exitCombineMode();
+                    this.setTool('select');
+                    this.render();
+
+                    console.log('Combine successful', {
+                        removedCount: polygonsToRemove.size,
+                        newPolygonVertices: newPoly.vertices.length,
+                        totalPolygons: this.polygons.length
                     });
-                    alert('Could not combine polygons. Ensure they overlap or touch to form a valid shape.');
-                    // Don't exit combine mode - let user adjust selection or cancel
-                    return;
+
+                } catch (e) {
+                    console.error('Critical error in executeCombine:', e);
+
+                    // CRITICAL: Restore state from backup
+                    console.log('Restoring state from backup...');
+                    this.polygons = stateBackup.polygons.map(p => {
+                        const poly = new Polygon(p.vertices, p.color);
+                        poly.name = p.name;
+                        poly.visible = p.visible;
+                        return poly;
+                    });
+
+                    // Try to restore selection
+                    if (stateBackup.selectedPolygonName) {
+                        this.selectedPolygon = this.polygons.find(p => p.name === stateBackup.selectedPolygonName) || null;
+                    } else {
+                        this.selectedPolygon = null;
+                    }
+
+                    this.updateProperties();
+                    this.updateLayers();
+                    this.render();
+
+                    alert('Error combining polygons. Your original shapes have been restored.');
+                }
+            }
+
+            // Helper: Check if two line segments intersect
+            segmentsIntersect(p1, p2, p3, p4) {
+                const d1 = this.direction(p3, p4, p1);
+                const d2 = this.direction(p3, p4, p2);
+                const d3 = this.direction(p1, p2, p3);
+                const d4 = this.direction(p1, p2, p4);
+
+                if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+                    ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+                    return true;
                 }
 
-                // STEP 3: Validate polygon has valid area (not degenerate)
-                const area = Math.abs(PolygonBoolean.getArea(unionResultVertices));
-                if (!isFinite(area) || area < 1e-6) {
-                    console.warn('Combined polygon would be degenerate', { area });
-                    alert('Combined polygon would be too small or invalid.');
-                    return;
+                const eps = 1e-9;
+                if (Math.abs(d1) < eps && this.onSegment(p3, p4, p1)) return true;
+                if (Math.abs(d2) < eps && this.onSegment(p3, p4, p2)) return true;
+                if (Math.abs(d3) < eps && this.onSegment(p1, p2, p3)) return true;
+                if (Math.abs(d4) < eps && this.onSegment(p1, p2, p4)) return true;
+
+                return false;
+            }
+
+            direction(a, b, c) {
+                return (c.x - a.x) * (b.y - a.y) - (b.x - a.x) * (c.y - a.y);
+            }
+
+            onSegment(a, b, c) {
+                return c.x >= Math.min(a.x, b.x) - 1e-9 && c.x <= Math.max(a.x, b.x) + 1e-9 &&
+                    c.y >= Math.min(a.y, b.y) - 1e-9 && c.y <= Math.max(a.y, b.y) + 1e-9;
+            }
+
+            // Helper: Compute convex hull using Graham scan
+            computeConvexHull(points) {
+                if (!points || points.length < 3) return null;
+
+                // Remove duplicates
+                const unique = [];
+                const seen = new Set();
+                for (const p of points) {
+                    const key = `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`;
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        unique.push({ x: p.x, y: p.y });
+                    }
                 }
 
-                // STEP 4: Create new polygon and validate it
-                const newPoly = new Polygon(unionResultVertices, this.currentColor);
-                newPoly.name = 'Combined Polygon ' + (this.polygons.length + 1);
+                if (unique.length < 3) return null;
 
-                if (!newPoly.vertices || newPoly.vertices.length < 3) {
-                    console.error('New polygon creation failed');
-                    alert('Error: Could not create combined polygon.');
-                    return;
+                // Find bottom-most point (or left-most in case of tie)
+                let start = 0;
+                for (let i = 1; i < unique.length; i++) {
+                    if (unique[i].y < unique[start].y ||
+                        (unique[i].y === unique[start].y && unique[i].x < unique[start].x)) {
+                        start = i;
+                    }
                 }
 
-                // STEP 5: NOW save history since we know the operation will succeed
-                // This is the critical fix - history is only saved after validation passes
-                this.saveHistory();
+                const pivot = unique[start];
 
-                // STEP 6: Perform the atomic state modification
-                // Remove old polygons and add new one
-                const polygonsToRemove = new Set(this.combineSelection);
-                this.polygons = this.polygons.filter(p => !polygonsToRemove.has(p));
-                this.polygons.push(newPoly);
-
-                // STEP 7: Update UI
-                this.selectedPolygon = newPoly;
-                this.updateProperties();
-                this.updateLayers();
-                this.exitCombineMode();
-                this.setTool('select');
-                this.render();
-
-                console.log('Combine successful', {
-                    removedCount: polygonsToRemove.size,
-                    newPolygonVertices: newPoly.vertices.length,
-                    totalPolygons: this.polygons.length
+                // Sort by polar angle
+                const sorted = unique.filter((_, i) => i !== start).sort((a, b) => {
+                    const angleA = Math.atan2(a.y - pivot.y, a.x - pivot.x);
+                    const angleB = Math.atan2(b.y - pivot.y, b.x - pivot.x);
+                    if (Math.abs(angleA - angleB) < 1e-9) {
+                        const distA = (a.x - pivot.x) ** 2 + (a.y - pivot.y) ** 2;
+                        const distB = (b.x - pivot.x) ** 2 + (b.y - pivot.y) ** 2;
+                        return distA - distB;
+                    }
+                    return angleA - angleB;
                 });
+
+                const hull = [{ x: pivot.x, y: pivot.y }];
+                for (const p of sorted) {
+                    while (hull.length > 1) {
+                        const a = hull[hull.length - 2];
+                        const b = hull[hull.length - 1];
+                        const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+                        if (cross <= 0) break;
+                        hull.pop();
+                    }
+                    hull.push({ x: p.x, y: p.y });
+                }
+
+                return hull.length >= 3 ? hull : null;
             }
 
             // Helper function to restore polygons from backup
@@ -3938,20 +4143,57 @@
 
                 // Handle Combine Mode Selection
                 if (this.combineMode && e.button === 0) {
-                    // Iterate backwards for visual stacking (top first)
+                    // Find all polygons under the click point
+                    const polygonsAtPoint = [];
                     for (let i = this.polygons.length - 1; i >= 0; i--) {
                         const poly = this.polygons[i];
                         if (!poly.visible) continue;
                         if (poly.containsPoint(snappedPos)) {
-                            if (this.combineSelection.has(poly)) {
-                                this.combineSelection.delete(poly);
-                            } else {
-                                this.combineSelection.add(poly);
-                            }
-                            this.render();
-                            this.updateLayers(); // Update sidebar to reflect selection
-                            return;
+                            polygonsAtPoint.push({ poly, index: i });
                         }
+                    }
+
+                    if (polygonsAtPoint.length > 0) {
+                        const now = Date.now();
+                        const CLICK_THRESHOLD = 500; // ms - time window for cycling
+                        const DISTANCE_THRESHOLD = 20; // pixels - tolerance for same location
+
+                        // Check if clicking same location within time window
+                        let isSameLocation = false;
+                        if (this.combineLastClickPos) {
+                            const dx = snappedPos.x - this.combineLastClickPos.x;
+                            const dy = snappedPos.y - this.combineLastClickPos.y;
+                            const distance = Math.sqrt(dx * dx + dy * dy);
+                            isSameLocation = distance < DISTANCE_THRESHOLD;
+                        }
+
+                        const isWithinTimeWindow = (now - this.combineLastClickTime) < CLICK_THRESHOLD;
+
+                        if (isSameLocation && isWithinTimeWindow && polygonsAtPoint.length > 1) {
+                            // Cycle to next polygon
+                            this.combineCycleIndex = (this.combineCycleIndex + 1) % polygonsAtPoint.length;
+                        } else {
+                            // New location or timeout - reset to first polygon
+                            this.combineCycleIndex = 0;
+                        }
+
+                        // Update tracking for next click
+                        this.combineLastClickPos = { x: snappedPos.x, y: snappedPos.y };
+                        this.combineLastClickTime = now;
+
+                        // Get the polygon at current cycle index
+                        const targetPoly = polygonsAtPoint[this.combineCycleIndex].poly;
+
+                        // Toggle selection for the targeted polygon
+                        if (this.combineSelection.has(targetPoly)) {
+                            this.combineSelection.delete(targetPoly);
+                        } else {
+                            this.combineSelection.add(targetPoly);
+                        }
+
+                        this.render();
+                        this.updateLayers(); // Update sidebar to reflect selection
+                        return;
                     }
                     return; // Don't do normal selection in combine mode
                 }
@@ -5986,6 +6228,8 @@
                     this.updateProperties();
                     this.updateLayers();
                     this.markGridForRedraw();
+                    // CRITICAL: Force render to ensure canvas reflects the undone state
+                    this.render(true);
                 } else {
                     console.log('Nothing to undo');
                 }
@@ -6001,6 +6245,8 @@
                     this.updateProperties();
                     this.updateLayers();
                     this.markGridForRedraw();
+                    // CRITICAL: Force render to ensure canvas reflects the redone state
+                    this.render(true);
                 } else {
                     console.log('Nothing to redo');
                 }
@@ -6057,7 +6303,8 @@
                     this.updateProperties();
                     this.updateLayers();
                     this.markGridForRedraw();
-                    this.render();
+                    // Force render to ensure canvas is updated immediately
+                    this.render(true);
                 } catch (e) {
                     console.error('Error loading state:', e);
                     // Don't crash - just log the error
