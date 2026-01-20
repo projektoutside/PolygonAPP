@@ -226,13 +226,20 @@
             height: 100dvh;
             max-width: 100%;
             max-height: none;
-            background: var(--color-bg);
+            background: white;
+            /* White background to match toolbar areas */
             border-radius: 0;
             margin: 0;
             overflow: hidden;
             box-shadow: none;
             flex-direction: row;
             position: relative;
+        }
+
+        /* Main Body Row - Ensure white background in top area */
+        .main-body-row {
+            background: white;
+            /* White background to prevent gray sections above sidebars */
         }
 
         /* Mobile: Stack vertically */
@@ -330,6 +337,26 @@
             align-items: center;
             min-height: var(--touch-target-min);
             flex-shrink: 0;
+            position: relative;
+        }
+
+        /* Panel header layout with back button */
+        .panel-header {
+            position: relative;
+        }
+
+        .panel-header .panel-back-btn {
+            position: absolute;
+            left: var(--spacing-md);
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 10;
+        }
+
+        /* Adjust header content when back button exists */
+        .panel-header .panel-back-btn + span,
+        .panel-header .panel-back-btn ~ span {
+            margin-left: 60px; /* Offset for back button on left */
         }
 
         .panel-header.dragging {
@@ -339,6 +366,49 @@
 
         .panel-header.dragging .drag-handle {
             color: white;
+        }
+
+        /* Back Button for Mobile Panels */
+        .panel-back-btn {
+            display: none; /* Hidden on desktop */
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            align-items: center;
+            gap: 6px;
+            min-height: var(--touch-target-min);
+            min-width: var(--touch-target-min);
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        .panel-back-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateX(-2px);
+        }
+
+        .panel-back-btn:active {
+            transform: translateX(-2px) scale(0.95);
+        }
+
+        .panel-back-btn svg {
+            width: 18px;
+            height: 18px;
+            stroke-width: 2.5;
+        }
+
+        /* Show back button on mobile and tablets when sidebar is open */
+        @media (max-width: 1024px) {
+            .sidebar.mobile-open .panel-back-btn,
+            .sidebar-right.mobile-open .panel-back-btn {
+                display: flex;
+            }
         }
 
         /* Toolbar - Compact Top Bar for All Devices */
@@ -494,7 +564,10 @@
             overflow-x: hidden;
             min-height: 0;
             flex-shrink: 0;
-            transition: transform 0.3s ease, width 0.3s ease;
+            transition: transform 0.3s ease, width 0.3s ease, position 0.3s ease;
+            /* Ensure sidebars are visible by default */
+            visibility: visible;
+            opacity: 1;
         }
 
         .sidebar-right {
@@ -506,11 +579,13 @@
         @media (max-width: 768px) {
             .sidebar {
                 position: fixed;
-                top: 0;
+                /* Start below toolbar - top tools bar + toolbar height */
+                top: clamp(96px, 12vw, 126px);
                 left: 0;
                 width: min(85vw, 320px);
-                height: 100vh;
-                height: 100dvh;
+                /* Height adjusted to account for top offset */
+                height: calc(100vh - clamp(96px, 12vw, 126px));
+                height: calc(100dvh - clamp(96px, 12vw, 126px));
                 z-index: var(--z-menu);
                 transform: translateX(-100%);
                 box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
@@ -533,10 +608,59 @@
             }
         }
 
-        /* Tablet: Medium sidebar width */
+        /* Tablet: Sidebars visible by default (like desktop), but can be toggled to overlay */
         @media (min-width: 769px) and (max-width: 1024px) {
             .sidebar {
+                /* On tablets, sidebars are visible by default like desktop */
                 width: var(--sidebar-width-tablet);
+                position: relative !important;
+                transform: none !important;
+                box-shadow: none;
+                /* Push sidebars down below toolbar - top-tools-bar + toolbar height */
+                /* Top tools bar: clamp(48px, 6vw, 56px) + Toolbar: clamp(48px, 6vw, 56px) to clamp(60px, 8vw, 70px) */
+                margin-top: clamp(96px, 12vw, 126px);
+                /* Constrain height to fill remaining viewport below toolbar */
+                height: calc(100vh - clamp(96px, 12vw, 126px));
+                height: calc(100dvh - clamp(96px, 12vw, 126px));
+                max-height: calc(100vh - clamp(96px, 12vw, 126px));
+                max-height: calc(100dvh - clamp(96px, 12vw, 126px));
+                top: auto;
+                left: auto;
+                right: auto;
+                z-index: auto;
+                /* Ensure visibility */
+                visibility: visible !important;
+                opacity: 1 !important;
+                display: flex !important;
+                /* Align to start of flex container */
+                align-self: flex-start;
+            }
+
+            /* When toggled to overlay mode on tablet (mobile-open class) */
+            .sidebar.mobile-open {
+                position: fixed !important;
+                top: clamp(96px, 12vw, 126px) !important;
+                left: 0;
+                width: min(70vw, 400px);
+                height: calc(100vh - clamp(96px, 12vw, 126px));
+                height: calc(100dvh - clamp(96px, 12vw, 126px));
+                z-index: var(--z-menu);
+                transform: translateX(0) !important;
+                box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+                /* Reset margin when in overlay mode */
+                margin-top: 0 !important;
+                align-self: auto;
+            }
+
+            .sidebar.sidebar-right.mobile-open {
+                left: auto;
+                right: 0;
+                transform: translateX(0) !important;
+                border-left: none;
+                border-right: 1px solid var(--color-border);
+                /* Reset margin when in overlay mode */
+                margin-top: 0 !important;
+                align-self: auto;
             }
         }
 
@@ -1397,10 +1521,11 @@
             background: #a8a8a8;
         }
 
-        /* Mobile sidebar backdrop */
+        /* Mobile and Tablet sidebar backdrop */
         .sidebar-backdrop {
             position: fixed;
-            top: 0;
+            /* Start below toolbar - same as sidebar top */
+            top: clamp(96px, 12vw, 126px);
             left: 0;
             right: 0;
             bottom: 0;
@@ -1412,15 +1537,16 @@
             display: none;
         }
 
+        /* Show backdrop on mobile only (tablets don't need it as sidebars are visible) */
         @media (max-width: 768px) {
             .sidebar-backdrop {
                 display: block;
             }
+        }
 
-            .sidebar-backdrop.active {
-                opacity: 1;
-                pointer-events: auto;
-            }
+        .sidebar-backdrop.active {
+            opacity: 1;
+            pointer-events: auto;
         }
 
         /* Ensure text is always readable */
@@ -1506,6 +1632,52 @@
         .sidebar,
         .canvas-container {
             transition: width 0.3s ease, height 0.3s ease, transform 0.3s ease;
+        }
+
+        /* Mobile Menu Toggle Buttons */
+        .mobile-menu-toggle {
+            position: absolute;
+            width: 44px;
+            height: 44px;
+            z-index: 999;
+            background: white;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            font-size: 20px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .mobile-menu-toggle:active {
+            transform: scale(0.95);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Hide on desktop */
+        @media (min-width: 769px) {
+            .mobile-menu-toggle {
+                display: none !important;
+            }
+        }
+
+        /* Ensure buttons don't interfere with canvas interactions */
+        @media (max-width: 768px) {
+            .mobile-menu-toggle {
+                pointer-events: auto;
+            }
+            
+            /* Make sure canvas container allows pointer events through except for buttons */
+            #canvasContainer {
+                position: relative;
+            }
         }
 
         /* Zoom Controls - Responsive Positioning */
@@ -1752,6 +1924,12 @@
                 <div class="resizable-panel" id="layersPanel" style="height: 100%; flex: 1;">
                     <!-- Layers Panel -->
                     <div class="panel-header">
+                        <button class="panel-back-btn" id="layersBackBtn" aria-label="Close Layers Panel">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M19 12H5M12 19l-7-7 7-7"/>
+                            </svg>
+                            <span>Back</span>
+                        </button>
                         <span>📐 Layers</span>
                         <span id="layerCount">0</span>
                     </div>
@@ -1833,6 +2011,12 @@
                 <!-- Visualizers Panel -->
                 <div class="panel">
                     <div class="panel-header">
+                        <button class="panel-back-btn" id="visualizersBackBtn" aria-label="Close Visualizers Panel">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M19 12H5M12 19l-7-7 7-7"/>
+                            </svg>
+                            <span>Back</span>
+                        </button>
                         <span>👁️ Visualizers</span>
                     </div>
                     <div class="panel-content">
@@ -2312,6 +2496,11 @@
                 this.lastTouchTime = 0; // Track last touch to prevent mouse event conflicts
                 this.touchStartPos = null; // Store initial touch position for tap detection
                 this.touchTapThreshold = 10; // Pixels to move before considering it a drag
+                this.touchPanThreshold = 15; // Pixels to move before starting pan (higher for touch)
+                this.touchDragThreshold = 8; // Pixels to move before starting drag
+                this.touchGestureLocked = false; // Lock gesture type once determined
+                this.touchLastMoveTime = 0; // Track movement timing for velocity
+                this.touchVelocity = { x: 0, y: 0 }; // Track touch velocity
                 this.lastDimensions = null; // Track dimensions for resize compensation
                 this.isResizingCanvas = false; // Flag to track intentional resize operations
 
@@ -2380,23 +2569,43 @@
             }
 
             handleViewportChange() {
-                // Update mobile sidebar visibility
-                if (this.deviceInfo.isMobile) {
-                    // Close sidebars by default on mobile
+                // Update sidebar visibility based on device type
+                if (this.deviceInfo.isMobile || window.innerWidth <= 768) {
+                    // Mobile: sidebars are overlays that start closed
                     document.querySelectorAll('.sidebar').forEach(sidebar => {
                         sidebar.classList.remove('mobile-open');
                     });
-                } else {
-                    // Show sidebars on desktop/tablet
+                    // Hide backdrop
+                    const backdrop = document.getElementById('sidebarBackdrop');
+                    if (backdrop) {
+                        backdrop.classList.remove('active');
+                    }
+                } else if (this.deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024)) {
+                    // Tablet: sidebars are visible by default (like desktop)
+                    // Remove mobile-open class to make them visible in normal position
                     document.querySelectorAll('.sidebar').forEach(sidebar => {
-                        sidebar.classList.add('mobile-open');
+                        sidebar.classList.remove('mobile-open');
                     });
+                    // Hide backdrop (sidebars are visible, not overlays)
+                    const backdrop = document.getElementById('sidebarBackdrop');
+                    if (backdrop) {
+                        backdrop.classList.remove('active');
+                    }
+                } else {
+                    // Desktop: sidebars are always visible (not overlays)
+                    document.querySelectorAll('.sidebar').forEach(sidebar => {
+                        sidebar.classList.remove('mobile-open');
+                    });
+                    const backdrop = document.getElementById('sidebarBackdrop');
+                    if (backdrop) {
+                        backdrop.classList.remove('active');
+                    }
                 }
 
-                // Adjust toolbar for mobile
+                // Adjust toolbar for mobile/tablet
                 const toolbar = document.querySelector('.toolbar');
-                if (toolbar && this.deviceInfo.isMobile) {
-                    toolbar.scrollLeft = 0; // Reset scroll on mobile
+                if (toolbar && (this.deviceInfo.isMobile || this.deviceInfo.isTablet || window.innerWidth <= 1024)) {
+                    toolbar.scrollLeft = 0; // Reset scroll on mobile/tablet
                 }
 
                 // Ensure canvas is properly sized
@@ -3822,9 +4031,22 @@
                 // Update last touch time to prevent mouse event conflicts
                 this.lastTouchTime = Date.now();
 
+                // COMPLETELY RESET all touch-related state for new touch
+                // This prevents coordinate system confusion from previous touches
+                this.isDragging = false;
+                this.isPanning = false;
+                this.touchGestureLocked = false;
+                this.touchVelocity = { x: 0, y: 0 };
+                this.touchLastMoveTime = Date.now();
+                this.dragStart = null;
+                this.panStartPos = null;
+                this.touchStartPos = null;
+                this.potentialDragStart = null;
+
                 // Handle multi-touch for pan/zoom
                 if (e.touches.length === 2) {
                     this.isPinching = true;
+                    this.touchGestureLocked = true; // Lock to pinch gesture
                     const touch1 = e.touches[0];
                     const touch2 = e.touches[1];
                     this.pinchDistance = Math.hypot(
@@ -3833,8 +4055,6 @@
                     );
                     this.pinchZoom = this.zoom;
                     // Clear any selection when pinching
-                    this.isDragging = false;
-                    this.isPanning = false;
                     this.selectedPolygon = null;
                     this.selectedVertex = null;
                     return;
@@ -3842,16 +4062,20 @@
 
                 // Single touch
                 const touch = e.touches[0];
+                if (!touch) return;
+
                 const rect = this.canvas.getBoundingClientRect();
                 const x = touch.clientX - rect.left;
                 const y = touch.clientY - rect.top;
                 const worldPos = this.screenToWorld(x, y);
                 const snappedPos = this.snapToGrid(worldPos);
 
-                // Store initial touch position for tap detection
-                this.panStartPos = { x, y };
+                // Store initial touch position for gesture detection
+                // ALWAYS use screen coordinates for these initial positions
+                this.panStartPos = { x, y }; // Screen coordinates - for panning
                 this.touchStartTime = Date.now();
-                this.touchStartPos = { x, y }; // Store for movement detection
+                this.touchStartPos = { x, y }; // Screen coordinates - for movement detection
+                this.touchLastMoveTime = Date.now();
 
                 // Handle Split Mode Interaction
                 if (this.splitMode) {
@@ -3912,12 +4136,20 @@
                         this.selectedPolygon = polygonHit.polygon;
                         if (polygonHit.vertex) {
                             this.selectedVertex = polygonHit.vertex;
-                            this.isDragging = true;
-                            this.dragStart = snappedPos;
+                            // Lock to drag gesture when touching vertex
+                            this.touchGestureLocked = true;
+                            // Use world coordinates for polygon dragging
+                            this.dragStart = snappedPos; // World coordinates for polygon drag
+                            this.potentialDragStart = snappedPos;
+                            // panStartPos already set to screen coordinates above
                         } else {
                             this.selectedVertex = null;
-                            // Prepare for potential drag, but don't start yet
-                            this.dragStart = snappedPos;
+                            // Prepare for potential drag, but wait for movement threshold
+                            // Use world coordinates for polygon dragging
+                            this.dragStart = snappedPos; // World coordinates for polygon drag
+                            this.potentialDragStart = snappedPos;
+                            // panStartPos already set to screen coordinates above
+                            // Don't lock gesture yet - allow panning if moved far enough
                         }
                         this.updateProperties();
                         this.updateLayers();
@@ -3925,8 +4157,10 @@
                         return;
                     } else {
                         // Touching empty space - prepare for panning, but allow quick tap to deselect
-                        this.dragStart = { x, y };
+                        // Don't set dragStart here - it will be set when panning actually starts
+                        // panStartPos already set to screen coordinates above
                         this.canvas.style.cursor = 'grab';
+                        // Don't lock gesture - will determine based on movement
                         // Don't deselect immediately - wait for touch end to see if it's a tap
                     }
                 }
@@ -3945,9 +4179,11 @@
                         touch2.clientY - touch1.clientY
                     );
 
-                    const scale = distance / this.pinchDistance;
-                    this.zoom = Math.max(0.1, Math.min(5, this.pinchZoom * scale));
-                    this.render(true); // Force render during pinch zoom for smooth experience
+                    if (this.pinchDistance > 0) {
+                        const scale = distance / this.pinchDistance;
+                        this.zoom = Math.max(0.1, Math.min(5, this.pinchZoom * scale));
+                        this.render(true); // Force render during pinch zoom for smooth experience
+                    }
                     return;
                 }
 
@@ -3961,9 +4197,23 @@
                 const worldPos = this.screenToWorld(x, y);
                 const snappedPos = this.snapToGrid(worldPos);
 
-                // Update coordinate display
-                document.getElementById('coordDisplay').textContent =
-                    `X: ${Math.round(snappedPos.x)}, Y: ${Math.round(snappedPos.y)}`;
+                // Calculate velocity for gesture detection
+                // ALWAYS use screen coordinates (touchStartPos) for velocity calculation
+                // Never use dragStart as it might be in world coordinates
+                const now = Date.now();
+                const timeDelta = Math.max(1, now - this.touchLastMoveTime);
+                if (this.touchStartPos && timeDelta > 0) {
+                    // Use touchStartPos which is always in screen coordinates
+                    this.touchVelocity.x = (x - this.touchStartPos.x) / timeDelta;
+                    this.touchVelocity.y = (y - this.touchStartPos.y) / timeDelta;
+                }
+                this.touchLastMoveTime = now;
+
+                // Update coordinate display (throttled)
+                const coordDisplay = document.getElementById('coordDisplay');
+                if (coordDisplay) {
+                    coordDisplay.textContent = `X: ${Math.round(snappedPos.x)}, Y: ${Math.round(snappedPos.y)}`;
+                }
 
                 // Calculate movement distance from touch start
                 let moveDistance = 0;
@@ -3983,27 +4233,99 @@
                     return;
                 }
 
-                // If we have a selected polygon, check if we're dragging it
-                if (this.selectedPolygon && !this.isDragging && moveDistance > this.touchTapThreshold) {
-                    // Start dragging if we moved enough
-                    this.isDragging = true;
-                }
-
-                // Check if we should start panning from empty space touch
-                if (this.panStartPos && this.dragStart && !this.isDragging && !this.isPanning &&
-                    this.currentTool === 'select' && !this.selectedPolygon) {
-                    // Lower threshold for touch (more sensitive)
-                    if (moveDistance > this.panThreshold * 0.7) {
-                        this.isPanning = true;
-                        this.canvas.style.cursor = 'grabbing';
+                // Determine gesture type if not locked yet
+                if (!this.touchGestureLocked && this.touchStartPos && moveDistance > 5) {
+                    // Check if we should lock to pan or drag
+                    if (this.selectedPolygon && !this.selectedVertex) {
+                        // If touching a polygon (not vertex), allow both drag and pan
+                        // Lock to drag if movement is small and consistent
+                        if (moveDistance > this.touchDragThreshold && moveDistance < this.touchPanThreshold) {
+                            this.touchGestureLocked = true;
+                            this.isDragging = true;
+                            // Ensure panStartPos is set for potential pan fallback
+                            if (!this.panStartPos) {
+                                this.panStartPos = { x, y };
+                            }
+                        } else if (moveDistance > this.touchPanThreshold) {
+                            // Large movement - prefer panning unless clearly dragging polygon
+                            const velocity = Math.sqrt(this.touchVelocity.x ** 2 + this.touchVelocity.y ** 2);
+                            if (velocity < 0.5) { // Slow movement - likely dragging polygon
+                                this.touchGestureLocked = true;
+                                this.isDragging = true;
+                                // Ensure panStartPos is set for potential pan fallback
+                                if (!this.panStartPos) {
+                                    this.panStartPos = { x, y };
+                                }
+                            } else {
+                                // Fast movement - likely panning
+                                this.touchGestureLocked = true;
+                                this.isPanning = true;
+                                this.isDragging = false;
+                                // Clear polygon selection when switching to pan
+                                this.selectedPolygon = null;
+                                this.selectedVertex = null;
+                                // Reset dragStart since we're switching to pan (different coordinate system)
+                                this.dragStart = null;
+                                // CRITICAL: Reset panStartPos to initial touch position to prevent jump
+                                // This ensures smooth panning from the start point, not from current position
+                                if (this.touchStartPos) {
+                                    this.panStartPos = { x: this.touchStartPos.x, y: this.touchStartPos.y };
+                                } else {
+                                    // Fallback: use current position if touchStartPos somehow missing
+                                    this.panStartPos = { x, y };
+                                }
+                                this.canvas.style.cursor = 'grabbing';
+                            }
+                        }
+                    } else if (!this.selectedPolygon) {
+                        // Empty space - lock to pan if moved enough
+                        if (moveDistance > this.touchPanThreshold) {
+                            this.touchGestureLocked = true;
+                            this.isPanning = true;
+                            // Clear any polygon-related drag state
+                            this.dragStart = null;
+                            // CRITICAL: Reset panStartPos to initial touch position to prevent jump
+                            // This ensures smooth panning from the start point
+                            if (this.touchStartPos) {
+                                this.panStartPos = { x: this.touchStartPos.x, y: this.touchStartPos.y };
+                            } else {
+                                // Fallback: use current position if touchStartPos somehow missing
+                                this.panStartPos = { x, y };
+                            }
+                            this.canvas.style.cursor = 'grabbing';
+                        }
                     }
                 }
 
                 // Continue panning if active
-                if (this.isPanning && this.dragStart) {
-                    this.pan.x += x - this.dragStart.x;
-                    this.pan.y += y - this.dragStart.y;
-                    this.dragStart = { x, y };
+                if (this.isPanning && this.panStartPos) {
+                    // Use panStartPos which is always in screen coordinates
+                    const dx = x - this.panStartPos.x;
+                    const dy = y - this.panStartPos.y;
+                    
+                    // Safety check: prevent huge jumps that indicate coordinate system error
+                    // If delta is too large (>500px), something is wrong - reset panStartPos
+                    const deltaMagnitude = Math.sqrt(dx * dx + dy * dy);
+                    if (deltaMagnitude > 500) {
+                        // Reset to current position to prevent jump
+                        this.panStartPos = { x, y };
+                        this.render(true);
+                        return;
+                    }
+                    
+                    // Prevent extreme pan values that could cause viewport jumping
+                    const maxPan = 10000; // Reasonable maximum pan value
+                    const newPanX = this.pan.x + dx;
+                    const newPanY = this.pan.y + dy;
+                    
+                    // Clamp pan values to prevent viewport jumping
+                    if (Math.abs(newPanX) < maxPan && Math.abs(newPanY) < maxPan) {
+                        this.pan.x = newPanX;
+                        this.pan.y = newPanY;
+                    }
+                    
+                    // Update panStartPos for next frame (screen coordinates)
+                    this.panStartPos = { x, y };
                     this.render(true); // Force render during pan
                     return;
                 }
@@ -4046,46 +4368,61 @@
                     this.saveHistory();
                 }
 
+                // Calculate final movement distance
+                let finalMoveDistance = 0;
+                if (this.touchStartPos && e.changedTouches[0]) {
+                    const touch = e.changedTouches[0];
+                    const rect = this.canvas.getBoundingClientRect();
+                    const x = touch.clientX - rect.left;
+                    const y = touch.clientY - rect.top;
+                    finalMoveDistance = Math.sqrt(
+                        Math.pow(x - this.touchStartPos.x, 2) +
+                        Math.pow(y - this.touchStartPos.y, 2)
+                    );
+                }
+
                 // If we tapped (didn't pan or drag), handle tap for deselection
-                if (this.touchStartPos && !this.isPanning && !this.isDragging && this.currentTool === 'select') {
+                if (this.touchStartPos && !this.isPanning && !this.isDragging && 
+                    this.currentTool === 'select' && finalMoveDistance <= this.touchTapThreshold) {
                     const touch = e.changedTouches[0];
                     if (touch) {
                         const rect = this.canvas.getBoundingClientRect();
                         const x = touch.clientX - rect.left;
                         const y = touch.clientY - rect.top;
-                        const moveDistance = Math.sqrt(
-                            Math.pow(x - this.touchStartPos.x, 2) +
-                            Math.pow(y - this.touchStartPos.y, 2)
-                        );
+                        const worldPos = this.screenToWorld(x, y);
+                        const snappedPos = this.snapToGrid(worldPos);
 
-                        // If we didn't move much, treat as a tap
-                        if (moveDistance <= this.touchTapThreshold) {
-                            const worldPos = this.screenToWorld(x, y);
-                            const snappedPos = this.snapToGrid(worldPos);
-
-                            // Check if tapping on empty space - if so, deselect and show grid clearly
-                            const polygonHit = this.findPolygonAtPoint(snappedPos);
-                            if (!polygonHit) {
-                                // Tapped empty space - deselect everything and show grid
-                                this.selectedPolygon = null;
-                                this.selectedVertex = null;
-                                this.updateProperties();
-                                this.updateLayers();
-                                this.render();
-                                // Grid will automatically be visible since nothing is selected
-                            }
+                        // Check if tapping on empty space - if so, deselect and show grid clearly
+                        const polygonHit = this.findPolygonAtPoint(snappedPos);
+                        if (!polygonHit) {
+                            // Tapped empty space - deselect everything and show grid
+                            // IMPORTANT: Clear all drag/pan state before deselecting to prevent coordinate issues
+                            this.isDragging = false;
+                            this.isPanning = false;
+                            this.dragStart = null;
+                            this.panStartPos = null;
+                            this.selectedPolygon = null;
+                            this.selectedVertex = null;
+                            this.updateProperties();
+                            this.updateLayers();
+                            this.render();
+                            // Grid will automatically be visible since nothing is selected
                         }
                     }
                 }
 
-                // Reset drag state
-                if (!this.isDragging || !this.selectedPolygon) {
-                    this.isDragging = false;
-                }
+                // COMPLETELY RESET all touch state to prevent any residual state
+                // This is critical to prevent coordinate system confusion on next touch
+                this.isDragging = false;
+                this.isPanning = false;
                 this.dragStart = null;
                 this.panStartPos = null;
                 this.touchStartTime = null;
                 this.touchStartPos = null;
+                this.touchGestureLocked = false;
+                this.touchVelocity = { x: 0, y: 0 };
+                this.touchLastMoveTime = 0;
+                this.potentialDragStart = null;
             }
 
             handleKeyDown(e) {
@@ -5651,29 +5988,43 @@
             }
         }
 
-        // Mobile menu toggle functionality
+        // Mobile and Tablet menu toggle functionality
         function toggleMobileSidebar(sidebar) {
-            if (deviceDetector && deviceDetector.getInfo().isMobile) {
+            const deviceInfo = deviceDetector ? deviceDetector.getInfo() : { isMobile: false, isTablet: false };
+            const isMobile = deviceInfo.isMobile || window.innerWidth <= 768;
+            const isTablet = deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024);
+            
+            // Enable for mobile and tablet devices
+            if (isMobile || isTablet) {
+                const wasOpen = sidebar.classList.contains('mobile-open');
                 sidebar.classList.toggle('mobile-open');
 
-                // Update backdrop
+                // Update backdrop - show only when sidebar is open as overlay
                 const backdrop = document.getElementById('sidebarBackdrop');
                 if (backdrop) {
                     if (sidebar.classList.contains('mobile-open')) {
+                        // Sidebar is now open as overlay
                         backdrop.classList.add('active');
                         backdrop.addEventListener('click', closeMobileSidebars);
                     } else {
-                        backdrop.classList.remove('active');
-                        backdrop.removeEventListener('click', closeMobileSidebars);
+                        // Sidebar is now closed/visible normally
+                        // Check if any other sidebar is open as overlay
+                        const hasOpenSidebar = document.querySelector('.sidebar.mobile-open');
+                        if (!hasOpenSidebar) {
+                            backdrop.classList.remove('active');
+                            backdrop.removeEventListener('click', closeMobileSidebars);
+                        }
                     }
                 }
 
-                // Close other sidebars
-                document.querySelectorAll('.sidebar').forEach(s => {
-                    if (s !== sidebar) {
-                        s.classList.remove('mobile-open');
-                    }
-                });
+                // On mobile, close other sidebars when opening one
+                if (isMobile) {
+                    document.querySelectorAll('.sidebar').forEach(s => {
+                        if (s !== sidebar) {
+                            s.classList.remove('mobile-open');
+                        }
+                    });
+                }
             }
         }
 
@@ -5688,65 +6039,135 @@
             }
         }
 
-        // Add mobile menu buttons if needed
+
+        // Setup back button handlers for panels
+        function setupPanelBackButtons() {
+            // Layers panel back button
+            const layersBackBtn = document.getElementById('layersBackBtn');
+            if (layersBackBtn) {
+                // Remove any existing listeners to prevent duplicates
+                const newLayersBtn = layersBackBtn.cloneNode(true);
+                layersBackBtn.parentNode.replaceChild(newLayersBtn, layersBackBtn);
+                
+                newLayersBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const layersSidebar = document.querySelector('.sidebar:not(.sidebar-right)');
+                    if (layersSidebar) {
+                        const deviceInfo = deviceDetector ? deviceDetector.getInfo() : { isMobile: false, isTablet: false };
+                        const isMobile = deviceInfo.isMobile || window.innerWidth <= 768;
+                        const isTablet = deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024);
+                        
+                        if (isMobile) {
+                            // On mobile, close the overlay
+                            closeMobileSidebars();
+                        } else if (isTablet) {
+                            // On tablet, toggle sidebar visibility (hide/show)
+                            toggleMobileSidebar(layersSidebar);
+                        }
+                    }
+                });
+            }
+
+            // Visualizers panel back button
+            const visualizersBackBtn = document.getElementById('visualizersBackBtn');
+            if (visualizersBackBtn) {
+                // Remove any existing listeners to prevent duplicates
+                const newVisualizersBtn = visualizersBackBtn.cloneNode(true);
+                visualizersBackBtn.parentNode.replaceChild(newVisualizersBtn, visualizersBackBtn);
+                
+                newVisualizersBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const visualizersSidebar = document.querySelector('.sidebar-right');
+                    if (visualizersSidebar) {
+                        const deviceInfo = deviceDetector ? deviceDetector.getInfo() : { isMobile: false, isTablet: false };
+                        const isMobile = deviceInfo.isMobile || window.innerWidth <= 768;
+                        const isTablet = deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024);
+                        
+                        if (isMobile) {
+                            // On mobile, close the overlay
+                            closeMobileSidebars();
+                        } else if (isTablet) {
+                            // On tablet, toggle sidebar visibility (hide/show)
+                            toggleMobileSidebar(visualizersSidebar);
+                        }
+                    }
+                });
+            }
+        }
+
+        // Add mobile menu buttons if needed (tablets show sidebars by default, but buttons available for toggling)
         function setupMobileMenus() {
-            if (deviceDetector && deviceDetector.getInfo().isMobile) {
+            const deviceInfo = deviceDetector ? deviceDetector.getInfo() : { isMobile: false, isTablet: false };
+            const isMobile = deviceInfo.isMobile || window.innerWidth <= 768;
+            const isTablet = deviceInfo.isTablet || (window.innerWidth > 768 && window.innerWidth <= 1024);
+            
+            // Show toggle buttons on mobile (required) and optionally on tablets (for overlay mode)
+            if (isMobile || isTablet) {
                 // Add menu toggle buttons to canvas container
                 const canvasContainer = document.getElementById('canvasContainer');
+                
+                // Calculate position below toolbar
+                // Top tools bar height + Toolbar height + small gap
+                const topToolsBar = document.querySelector('.top-tools-bar');
+                const toolbar = document.querySelector('.toolbar');
+                let topOffset = 12; // Default gap
+                
+                if (topToolsBar && toolbar) {
+                    const topToolsBarHeight = topToolsBar.getBoundingClientRect().height;
+                    const toolbarHeight = toolbar.getBoundingClientRect().height;
+                    topOffset = topToolsBarHeight + toolbarHeight + 8; // 8px gap below toolbar
+                } else {
+                    // Fallback calculation based on CSS values
+                    // Top tools bar: clamp(48px, 6vw, 56px) + mobile offset clamp(10px, 2vw, 15px)
+                    // Toolbar: clamp(48px, 6vw, 56px) to clamp(60px, 8vw, 70px)
+                    const viewportWidth = window.innerWidth;
+                    const topBarHeight = Math.max(48, Math.min(56, viewportWidth * 0.06)) + 
+                                        (viewportWidth <= 768 ? Math.max(10, Math.min(15, viewportWidth * 0.02)) : 0);
+                    const toolbarHeight = Math.max(48, Math.min(70, viewportWidth * 0.08));
+                    topOffset = topBarHeight + toolbarHeight + 8;
+                }
 
-                // Left sidebar toggle
-                if (!document.getElementById('mobileMenuLeft')) {
-                    const leftToggle = document.createElement('button');
+                // Left sidebar toggle (Layers)
+                let leftToggle = document.getElementById('mobileMenuLeft');
+                if (!leftToggle) {
+                    leftToggle = document.createElement('button');
                     leftToggle.id = 'mobileMenuLeft';
                     leftToggle.className = 'mobile-menu-toggle';
-                    leftToggle.innerHTML = '☰';
-                    leftToggle.style.cssText = `
-                position: absolute;
-                top: 12px;
-                left: 12px;
-                width: 44px;
-                height: 44px;
-                z-index: 1001;
-                background: white;
-                border: none;
-                border-radius: 8px;
-                font-size: 20px;
-                cursor: pointer;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            `;
-                    leftToggle.addEventListener('click', () => {
+                    leftToggle.innerHTML = '📐';
+                    leftToggle.setAttribute('aria-label', 'Toggle Layers Panel');
+                    leftToggle.style.left = '12px';
+                    leftToggle.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
                         const sidebar = document.querySelector('.sidebar:not(.sidebar-right)');
                         if (sidebar) toggleMobileSidebar(sidebar);
                     });
                     canvasContainer.appendChild(leftToggle);
                 }
+                // Update position
+                leftToggle.style.top = `${topOffset}px`;
 
-                // Right sidebar toggle
-                if (!document.getElementById('mobileMenuRight')) {
-                    const rightToggle = document.createElement('button');
+                // Right sidebar toggle (Visualizers)
+                let rightToggle = document.getElementById('mobileMenuRight');
+                if (!rightToggle) {
+                    rightToggle = document.createElement('button');
                     rightToggle.id = 'mobileMenuRight';
                     rightToggle.className = 'mobile-menu-toggle';
-                    rightToggle.innerHTML = '⚙️';
-                    rightToggle.style.cssText = `
-                position: absolute;
-                top: 12px;
-                right: 12px;
-                width: 44px;
-                height: 44px;
-                z-index: 1001;
-                background: white;
-                border: none;
-                border-radius: 8px;
-                font-size: 20px;
-                cursor: pointer;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            `;
-                    rightToggle.addEventListener('click', () => {
+                    rightToggle.innerHTML = '👁️';
+                    rightToggle.setAttribute('aria-label', 'Toggle Visualizers Panel');
+                    rightToggle.style.right = '12px';
+                    rightToggle.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
                         const sidebar = document.querySelector('.sidebar-right');
                         if (sidebar) toggleMobileSidebar(sidebar);
                     });
                     canvasContainer.appendChild(rightToggle);
                 }
+                // Update position
+                rightToggle.style.top = `${topOffset}px`;
             } else {
                 // Remove mobile menu buttons on desktop
                 const leftToggle = document.getElementById('mobileMenuLeft');
@@ -5761,14 +6182,29 @@
         window.addEventListener('load', () => {
             // Initialize device detector first
             deviceDetector = new DeviceDetector();
+            
+            // Setup panel back buttons
+            setupPanelBackButtons();
 
             app = new PolygonPlayground();
 
             // Setup mobile menus
             setupMobileMenus();
 
-            // Update mobile menus on resize
+            // Update mobile menus on resize and orientation change
             window.addEventListener('deviceResize', setupMobileMenus);
+            window.addEventListener('resize', () => {
+                // Debounce resize to avoid too many calls
+                clearTimeout(window.mobileMenuResizeTimeout);
+                window.mobileMenuResizeTimeout = setTimeout(() => {
+                    setupMobileMenus();
+                }, 100);
+            });
+            window.addEventListener('orientationchange', () => {
+                setTimeout(() => {
+                    setupMobileMenus();
+                }, 200);
+            });
 
             // Example: Set up telemetry callbacks
             app.setTelemetryCallbacks({
@@ -6354,6 +6790,15 @@
             static distSq(p1, p2) {
                 return (p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2;
             }
+        }
+
+        // Initialize the application once the DOM is fully loaded
+        // Setup back buttons when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupPanelBackButtons);
+        } else {
+            // DOM already loaded
+            setupPanelBackButtons();
         }
 
         // Initialize the application once the DOM is fully loaded
