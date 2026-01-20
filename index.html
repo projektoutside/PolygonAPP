@@ -1746,10 +1746,15 @@
         .bottom-panel.collapsed {
             height: 40px;
             /* Header height only */
+            pointer-events: none;
         }
 
         .bottom-panel.collapsed .bottom-panel-content {
             display: none;
+        }
+
+        .bottom-panel.collapsed .bottom-panel-header {
+            pointer-events: auto;
         }
 
         .bottom-panel-header {
@@ -6426,12 +6431,52 @@
                     const combinedCycles = this.unionTwoPolygons(result, clip);
 
                     if (combinedCycles && combinedCycles.length > 0) {
-                        // Return all parts merged into a single path
-                        result = this.mergeCycles(combinedCycles);
+                        // Get only the outer boundary cycle (largest area, containing all others)
+                        result = this.getOuterBoundary(combinedCycles);
                     }
                 }
 
                 return result;
+            }
+
+            // Get the outer boundary cycle from multiple cycles, discarding internal ones
+            static getOuterBoundary(cycles) {
+                if (!cycles || cycles.length === 0) return null;
+                if (cycles.length === 1) return cycles[0];
+
+                // Calculate area for each cycle and check containment
+                const cyclesWithInfo = cycles.map(cycle => ({
+                    cycle: cycle,
+                    area: Math.abs(this.getArea(cycle))
+                }));
+
+                // Sort by area (largest first)
+                cyclesWithInfo.sort((a, b) => b.area - a.area);
+
+                // Find the outermost cycle (not contained by any other)
+                for (let i = 0; i < cyclesWithInfo.length; i++) {
+                    const candidate = cyclesWithInfo[i].cycle;
+                    let isContained = false;
+
+                    // Check if this cycle is contained by any larger cycle
+                    for (let j = 0; j < i; j++) {
+                        const largerCycle = cyclesWithInfo[j].cycle;
+                        // Test a point from candidate cycle
+                        const testPoint = candidate[0];
+                        if (this.pointRelation(testPoint, largerCycle) === -1) {
+                            isContained = true;
+                            break;
+                        }
+                    }
+
+                    // If not contained, this is an outer boundary
+                    if (!isContained) {
+                        return candidate;
+                    }
+                }
+
+                // Fallback: return the largest cycle
+                return cyclesWithInfo[0].cycle;
             }
 
             // New static method to merge multiple disjoint cycles into a single path
