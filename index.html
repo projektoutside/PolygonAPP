@@ -4867,7 +4867,8 @@
                 this.ctx.translate(cssWidth / 2 + this.pan.x, cssHeight / 2 + this.pan.y);
                 this.ctx.scale(this.zoom, this.zoom);
 
-                // Draw grid (always draw to ensure visibility)
+                // Draw grid FIRST before any other operations
+                // This ensures grid is always drawn and not affected by other drawing operations
                 this.drawGrid();
 
                 // Draw visualizers
@@ -4927,6 +4928,10 @@
                     return;
                 }
 
+                // Save context state BEFORE any grid operations
+                // This preserves the current transformation matrix (translate/scale)
+                this.ctx.save();
+
                 // Get CSS dimensions for coordinate calculations
                 const rect = this.canvas.getBoundingClientRect();
                 const cssWidth = rect.width;
@@ -4934,6 +4939,7 @@
 
                 // Safety check: ensure dimensions are valid
                 if (!cssWidth || !cssHeight || !isFinite(cssWidth) || !isFinite(cssHeight)) {
+                    this.ctx.restore(); // Restore context before returning
                     return;
                 }
 
@@ -4952,34 +4958,22 @@
                 };
 
                 // Check if grid state changed (for caching optimization)
+                // Note: We don't track selectedPolygon anymore since grid color is consistent
                 const currentGridState = {
                     gridSize: this.gridSize,
                     zoom: this.zoom,
                     panX: Math.round(this.pan.x * 100) / 100,
                     panY: Math.round(this.pan.y * 100) / 100,
-                    selectedPolygon: !!this.selectedPolygon,
                     cssWidth: Math.round(cssWidth),
                     cssHeight: Math.round(cssHeight)
                 };
 
-                // Only redraw if grid state changed significantly
-                // Always draw on first render (when lastGridState is null)
-                if (this.lastGridState) {
-                    const stateChanged =
-                        Math.abs(currentGridState.gridSize - this.lastGridState.gridSize) > 0.01 ||
-                        Math.abs(currentGridState.zoom - this.lastGridState.zoom) > 0.01 ||
-                        Math.abs(currentGridState.panX - this.lastGridState.panX) > 0.1 ||
-                        Math.abs(currentGridState.panY - this.lastGridState.panY) > 0.1 ||
-                        currentGridState.selectedPolygon !== this.lastGridState.selectedPolygon ||
-                        currentGridState.cssWidth !== this.lastGridState.cssWidth ||
-                        currentGridState.cssHeight !== this.lastGridState.cssHeight;
-
-                    if (!stateChanged && !this.gridNeedsRedraw) {
-                        return; // Skip redraw if state hasn't changed
-                    }
-                }
-                // If lastGridState is null, this is the first render - always draw
-
+                // ALWAYS draw the grid - disable aggressive caching that was causing issues
+                // The grid must be drawn every frame to ensure it's always visible
+                // Performance is acceptable since grid drawing is already optimized
+                
+                // Update state tracking (for potential future optimizations)
+                // But never skip drawing based on this
                 this.lastGridState = currentGridState;
                 this.gridViewBounds = viewBounds;
                 this.gridNeedsRedraw = false;
@@ -5002,6 +4996,7 @@
                         majorGridMultiplier = 5; // Slightly zoomed out - show every 5th line
                     }
                     this.drawGridLines(viewBounds, this.gridSize * majorGridMultiplier, true);
+                    this.ctx.restore(); // Restore context before returning
                     return;
                 }
 
@@ -5014,12 +5009,16 @@
                         this.drawGridLines(viewBounds, subGridSize, false);
                     }
                     this.drawGridLines(viewBounds, this.gridSize, true);
+                    this.ctx.restore(); // Restore context before returning
                     return;
                 }
 
                 // Normal grid rendering - optimized batch drawing
                 // For optimal visibility, always draw the main grid
                 this.drawGridLines(viewBounds, this.gridSize, false);
+                
+                // Restore context state after drawing grid
+                this.ctx.restore();
             }
 
             drawGridLines(viewBounds, gridSize, isMajor = false) {
@@ -5028,22 +5027,27 @@
                     return;
                 }
 
-                // Make grid more visible when nothing is selected
-                // Enhanced contrast for better visibility
-                const gridColor = this.selectedPolygon
-                    ? (isMajor ? '#d0d0d0' : '#e8e8e8')
-                    : (isMajor ? '#b0b0b0' : '#d0d0d0'); // Darker when nothing selected for better visibility
+                // Consistent grid colors - ALWAYS use these exact colors
+                // Never change based on selection or any other state
+                const gridColor = isMajor ? '#c0c0c0' : '#d8d8d8';
 
-                // Optimize line width calculation
+                // Optimize line width calculation - consistent line widths
                 const zoomInv = 1 / this.zoom;
-                const baseLineWidth = isMajor ? (this.selectedPolygon ? 1.2 : 1.5) : (this.selectedPolygon ? 0.8 : 1.0);
+                const baseLineWidth = isMajor ? 1.2 : 0.9;
                 const lineWidth = baseLineWidth * zoomInv;
 
-                // Clamp line width to reasonable bounds for performance
+                // Clamp line width to reasonable bounds for performance and visibility
                 const clampedLineWidth = Math.max(0.5, Math.min(2.0, lineWidth));
 
+                // CRITICAL: Explicitly set all stroke properties to ensure consistency
+                // Reset any previous state that might affect grid rendering
                 this.ctx.strokeStyle = gridColor;
                 this.ctx.lineWidth = clampedLineWidth;
+                this.ctx.lineCap = 'butt';
+                this.ctx.lineJoin = 'miter';
+                this.ctx.setLineDash([]); // Ensure no dash pattern
+                this.ctx.globalAlpha = 1.0; // Ensure full opacity
+                this.ctx.globalCompositeOperation = 'source-over'; // Ensure normal blending
 
                 // Calculate grid line bounds with improved precision and safety checks
                 // Use epsilon to handle edge cases near zero
@@ -5103,10 +5107,14 @@
                 }
                 this.ctx.stroke();
 
-                // Draw axes only for major grid with enhanced visibility
+                // Draw axes only for major grid with consistent visibility
                 if (isMajor && Math.abs(gridSize - this.gridSize) < 0.01) {
-                    this.ctx.strokeStyle = this.selectedPolygon ? '#888' : '#777'; // Darker when nothing selected
+                    // Explicitly set axis properties to ensure consistency
+                    this.ctx.strokeStyle = '#999';
                     this.ctx.lineWidth = Math.max(1.5, Math.min(3.0, 2 * zoomInv));
+                    this.ctx.lineCap = 'butt';
+                    this.ctx.setLineDash([]); // Ensure solid lines for axes
+                    this.ctx.globalAlpha = 1.0;
 
                     // X-axis
                     this.ctx.beginPath();
@@ -5123,8 +5131,14 @@
             }
 
             drawPolygon(polygon, selected = false) {
+                // Save context state before drawing polygon to ensure grid isn't affected
+                this.ctx.save();
+                
                 const vertices = polygon.vertices;
-                if (vertices.length < 2) return;
+                if (vertices.length < 2) {
+                    this.ctx.restore();
+                    return;
+                }
 
                 // Draw fill
                 this.ctx.fillStyle = polygon.color + '33';
@@ -5164,6 +5178,9 @@
                     this.ctx.fill();
                     this.ctx.stroke();
                 }
+                
+                // Restore context state after drawing polygon
+                this.ctx.restore();
             }
 
             drawVisualizers() {
