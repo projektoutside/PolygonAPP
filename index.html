@@ -2787,10 +2787,19 @@
                         const duration = 350; // Slightly longer than CSS to ensure we catch the end
 
                         const animateResize = () => {
-                            this.resizeCanvas();
+                            // Synchronous update prevents white flash
+                            // Update dimensions immediately
+                            this.syncResize(true);
+                            // Force redraw immediately
+                            this.gridNeedsRedraw = true;
+                            this.lastGridState = null;
+                            this.render(true);
 
                             if (Date.now() - startTime < duration) {
                                 requestAnimationFrame(animateResize);
+                            } else {
+                                // Final ensure of text/layout sharpness
+                                this.resizeCanvas();
                             }
                         };
 
