@@ -417,8 +417,8 @@
         /* Toolbar - Compact Top Bar for All Devices */
         .toolbar {
             position: fixed;
-            top: clamp(48px, 6vw, 56px);
-            /* Pushed down by top tools bar */
+            top: clamp(56px, 7vw, 66px);
+            /* Pushed down by top tools bar with additional gap */
             left: 0;
             right: 0;
             width: 100%;
@@ -1429,16 +1429,32 @@
             opacity: 0.95;
         }
 
-        .grid-toggle-item {
+        .top-bar-btn {
+            background: white;
+            border: 1px solid var(--color-border);
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-weight: 500;
+            gap: 6px;
+            transition: all 0.2s;
             color: #4a5568;
-            font-size: 14px;
-            padding-right: 4px;
-            border-left: 1px solid #e2e8f0;
-            padding-left: 12px;
+        }
+
+        .top-bar-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            background: #f7fafc;
+            color: var(--color-primary);
+            border-color: var(--color-primary);
+        }
+
+        .top-bar-btn:active {
+            transform: translateY(0);
         }
 
         /* Mobile: Adjust position */
@@ -2026,9 +2042,6 @@
                         data-tooltip="Cancel Split">Cancel</button>
                     <button class="tool-btn" data-tool="undo" data-tooltip="Undo (Ctrl+Z)">↶</button>
                     <button class="tool-btn" data-tool="redo" data-tooltip="Redo (Ctrl+Y)">↷</button>
-                    <button class="tool-btn" data-tool="save" data-tooltip="Save">💾</button>
-                    <button class="tool-btn" data-tool="load" data-tooltip="Load">📁</button>
-                    <button class="tool-btn" data-tool="reset" data-tooltip="Reset">🔄</button>
                 </div>
 
                 <!-- Top Tools Bar (Tabs) -->
@@ -2036,10 +2049,12 @@
                     <button class="learn-tab-btn" id="openLearnPageBtn">
                         🎓 Learn Polygons
                     </button>
-                    <div class="grid-toggle-item">
-                        <span>Grid Snap</span>
-                        <div class="toggle-switch active" id="gridSnapToggle"></div>
-                    </div>
+                    <button class="top-bar-btn" data-tool="save" title="Save Project">
+                        💾 Save
+                    </button>
+                    <button class="top-bar-btn" data-tool="load" title="Open Project">
+                        📁 Open
+                    </button>
                     <button class="fullscreen-top-btn" id="fullscreenToggle" title="Toggle Fullscreen">⤢</button>
                 </div>
 
@@ -2910,7 +2925,6 @@
                 document.getElementById('zoomIn').addEventListener('click', () => this.zoomIn());
                 document.getElementById('zoomOut').addEventListener('click', () => this.zoomOut());
                 document.getElementById('zoomReset').addEventListener('click', () => this.zoomReset());
-                document.getElementById('gridSnapToggle').addEventListener('click', () => this.toggleGridSnap());
                 document.getElementById('fullscreenToggle').addEventListener('click', () => this.toggleFullscreen());
 
                 // Fullscreen change event listeners (with browser prefixes)
@@ -6142,18 +6156,7 @@
                 this.render();
             }
 
-            toggleGridSnap() {
-                this.gridSnap = !this.gridSnap;
-                const toggle = document.getElementById('gridSnapToggle');
-                if (toggle) {
-                    toggle.classList.toggle('active');
-                }
-                // Mark grid for redraw
-                this.gridNeedsRedraw = true;
-                this.lastGridState = null; // Force grid state recalculation
-                // Trigger render to update grid appearance if needed
-                this.render(true);
-            }
+
 
             togglePolygonVisibility(index) {
                 if (this.polygons[index]) {
