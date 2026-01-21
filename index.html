@@ -2022,6 +2022,7 @@
 
                 <!-- Toolbar -->
                 <div class="toolbar">
+                    <button class="tool-btn" id="toolbarCreateBtn" data-tooltip="Create New Polygon">➕</button>
                     <button class="tool-btn active" data-tool="select" data-tooltip="Select/Move (S)">✋</button>
 
                     <!-- Color Picker Button -->
@@ -3110,12 +3111,13 @@
             setupShapeMenu() {
                 const modal = document.getElementById('createShapeModal');
                 const createPolygonBtn = document.getElementById('createPolygonBtn');
+                const toolbarCreateBtn = document.getElementById('toolbarCreateBtn');
                 const closeBtn = document.getElementById('closeCreateShapeModal');
 
                 // Open Modal
-                createPolygonBtn.addEventListener('click', (e) => {
-                    this.openShapeMenu();
-                });
+                const openMenu = () => this.openShapeMenu();
+                if (createPolygonBtn) createPolygonBtn.addEventListener('click', openMenu);
+                if (toolbarCreateBtn) toolbarCreateBtn.addEventListener('click', openMenu);
 
                 // Close Modal with X button
                 closeBtn.addEventListener('click', () => {
